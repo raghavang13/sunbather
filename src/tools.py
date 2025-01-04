@@ -416,10 +416,9 @@ def process_overview(filename, Rp=None, altmax=None, abundances=None):
         Planet radius in units of cm, by default None
     altmax : numeric, optional
         Maximum altitude of the simulation in units of planet radius, by default None
-    abundances : dict, optional
-        Dictionary with the abudance of each element, expressed as a fraction of the total.
-        Can be easily created with get_abundances(). By default None, which 
-        results in solar composition.
+    abundances : tools.Abundances
+        Object storing abundances of all thirty elements.
+        Can be easily created with tools.Abundances(). By default None, which results in a solar composition.
 
     Returns
     -------
@@ -429,7 +428,7 @@ def process_overview(filename, Rp=None, altmax=None, abundances=None):
 
     ovr = pd.read_table(filename)
     ovr.rename(columns={'#depth':'depth'}, inplace=True)
-    abundance_on_Cloudygrid = abundances.get_abundance_profile(grid=ovr.depth.values,Rp=Rp)
+    abundance_on_Cloudygrid = abundances.get_abundance_profile(grid=ovr.depth.values, altmax=altmax, Rp=Rp) #Interpolates abundances onto depth grid in Cloudy output
     ovr['rho'] = hden_to_rho(ovr.hden, abundances=abundance_on_Cloudygrid) #Hdens to total dens
     if Rp != None and altmax != None:
         ovr['alt'] = altmax * Rp - ovr['depth']
@@ -828,10 +827,9 @@ def calc_mu(rho, ne, abundances=None, mass=False):
         Mass density in units of g cm-3.
     ne : array-like or numeric
         Electron number density in units of cm-3.
-    abundances : dict, optional
-        Dictionary with the abundance of each element, expressed as a fraction of the total.
-        Can be easily created with get_abundances(). By default None, which 
-        results in solar composition.
+    abundances : tools.Abundances
+        Object storing abundances of all thirty elements.
+        Can be easily created with tools.Abundances(). By default None, which results in a solar composition.
     mass : bool, optional
         If True returns mu in units of g, if False returns mu in units of amu, by default False.
 
@@ -855,72 +853,6 @@ def calc_mu(rho, ne, abundances=None, mass=False):
     return mu
 
 
-def get_zdict(z=1., zelem={}):
-    """
-    Returns a dictionary of the scale factors of each element relative to solar.
-
-    Parameters
-    ----------
-    z : numeric, optional
-        Metallicity relative to solar (in linear units, i.e., z=1 is solar), by default 1.
-    zelem : dict, optional
-        Dictionary of scale factors for specific elements. For example,
-        {'C':2} to get two times the solar carbon abundance. By default {}.
-
-    Returns
-    -------
-    zdict : dict
-        Dictionary with the scale factors of all elements relative
-        to the default solar composition.
-    """
-
-    assert 'H' not in zelem.keys(), "You cannot scale hydrogen, scale everything else instead."
-
-    zdict = {'He':1., 'Li':z, 'Be':z, 'B':z, 'C':z, 'N':z, 'O':z, 'F':z, 'Ne':z,
-    'Na':z, 'Mg':z, 'Al':z, 'Si':z, 'P':z, 'S':z, 'Cl':z, 'Ar':z, 'K':z, 'Ca':z,
-    'Sc':z, 'Ti':z, 'V':z, 'Cr':z, 'Mn':z, 'Fe':z, 'Co':z, 'Ni':z, 'Cu':z, 'Zn':z}
-
-    for element in zelem.keys():
-        zdict[element] *= zelem[element]
-
-    return zdict
-
-
-def get_abundances(zdict=None):
-    """
-    Returns a dictionary of the fractional abundances of each element (sums to 1).
-
-    Parameters
-    ----------
-    zdict : dict, optional
-        Dictionary with the scale factors of all elements relative
-        to a solar composition. Can be easily created with get_zdict().
-        Default is None, which results in a solar composition.
-
-    Returns
-    -------
-    abundances : dict
-        Dictionary with the abundances of all elements, expressed as a fraction of the total.
-    """
-
-    #solar abundance relative to hydrogen (Hazy table 7.1):
-    rel_abundances = {'H':1., 'He':0.1, 'Li':2.04e-9, 'Be':2.63e-11, 'B':6.17e-10,
-    'C':2.45e-4, 'N':8.51e-5, 'O':4.9e-4, 'F':3.02e-8, 'Ne':1e-4,
-    'Na':2.14e-6, 'Mg':3.47e-5, 'Al':2.95e-6, 'Si':3.47e-5, 'P':3.2e-7,
-    'S':1.84e-5, 'Cl':1.91e-7, 'Ar':2.51e-6, 'K':1.32e-7, 'Ca':2.29e-6,
-    'Sc':1.48e-9, 'Ti':1.05e-7, 'V':1e-8, 'Cr':4.68e-7, 'Mn':2.88e-7,
-    'Fe':2.82e-5, 'Co':8.32e-8, 'Ni':1.78e-6, 'Cu':1.62e-8, 'Zn':3.98e-8}
-
-    if zdict != None:
-        assert 'H' not in zdict.keys(), "You cannot scale hydrogen, scale everything else instead."
-        for element in zdict.keys():
-            rel_abundances[element] *= zdict[element]
-
-    total = sum(list(rel_abundances.values()))
-    abundances = {k: v / total for k, v in rel_abundances.items()}
-
-    return abundances
-
 
 def rho_to_hden(rho, abundances=None):
     """
@@ -938,11 +870,10 @@ def rho_to_hden(rho, abundances=None):
     ----------
     rho : array-like or numeric
         Mass density in units of g cm-3.
-    abundances : dict, optional
-        Dictionary with the abundance of each element, expressed as a fraction of the total.
-        Can be easily created with get_abundances(). By default None, which 
-        results in solar composition.
-
+    abundances : tools.Abundances
+        Object storing abundances of all thirty elements.
+        Can be easily created with tools.Abundances(). By default None, which results in solar composition.
+    
     Returns
     -------
     hden : array-like or numeric
@@ -979,10 +910,9 @@ def hden_to_rho(hden, abundances=None):
     ----------
     hden : array-like or numeric
         Hydrogen number density in units of cm-3.
-    abundances : dict, optional
-        Dictionary with the abundance of each element, expressed as a fraction of the total.
-        Can be easily created with get_abundances(). By default None, which 
-        results in solar composition.
+    abundances : tools.Abundances
+        Object storing abundances of all thirty elements.
+        Can be easily created with tools.Abundances(). By default None, which results in solar composition.
 
     Returns
     -------
@@ -1467,9 +1397,9 @@ def write_Cloudy_in(simname, title=None, flux_scaling=None,
         at the back-side into the planet core. By default False
     cosmic_rays : bool, optional
         Whether to include cosmic rays, by default False
-    zdict : dict, optional
-        Dictionary with the scale factors of all elements relative
-        to a solar composition. Can be easily created with get_zdict().
+    alaw : dict, optional
+        Dictionary with abundances of elements that have been scaled and/or fractionated in the form of 
+        either a constant or a numpy column stack respectively.Can be easily created with get_alaw_Cloudy(). 
         Default is None, which results in a solar composition.
     hcfrac : str or numeric, optional
         Threshold fraction of the total heating/cooling rate for which the .heat and
@@ -1510,7 +1440,6 @@ def write_Cloudy_in(simname, title=None, flux_scaling=None,
         if alaw is not None: 
             f.write("\n# ========= abundance laws ===========")
             for element in alaw:
-            #May want to add a condition to ensure only non-solar composition elements are written, but those shouldn't be in alaw unless user adds it deliberately
                 if (element!='H' and isinstance(alaw[element], float)): 
                     if(alaw[element]==-np.inf):
                         f.write("\nelement "+element_names[element]+" off")
@@ -1668,27 +1597,44 @@ def insertden_Cloudy_in(simname, denspecies, selected_den_levels=True, rerun=Fal
 #######################################
 
 class Abundances:
+    '''
+    Class that stores the abundance profiles of the elements in a planetary atmosphere. Contains methods to modify these profiles.
+    '''
 
-    def __init__(self):
-        #from Hazy Table 7.1:
+    def __init__(self, altmax=20):
+        '''
+        Sets the initial (solar) abundance profile of the atmosphere upto a particular altitude (altmax)
+
+        Parameters
+        ----------
+        altmax : int, optional
+            Maximum altitude of the abundance profiles in units of planet radius, by default 20. 
+            Can be set by the user when running simulations, or read from input files of simulations
+        '''
+
+        # from Hazy Table 7.1:
         self.__solar_abundances_relH = {'H': 1., 'He': 0.1, 'Li': 2.04e-9, 'Be': 2.63e-11, 'B': 6.17e-10,
                                 'C': 2.45e-4, 'N': 8.51e-5, 'O': 4.9e-4, 'F': 3.02e-8, 'Ne': 1e-4,
                                 'Na': 2.14e-6, 'Mg': 3.47e-5, 'Al': 2.95e-6, 'Si': 3.47e-5, 'P': 3.2e-7,
                                 'S': 1.84e-5, 'Cl': 1.91e-7, 'Ar': 2.51e-6, 'K': 1.32e-7, 'Ca': 2.29e-6,
                                 'Sc': 1.48e-9, 'Ti': 1.05e-7, 'V': 1e-8, 'Cr': 4.68e-7, 'Mn': 2.88e-7,
                                 'Fe': 2.82e-5, 'Co': 8.32e-8, 'Ni': 1.78e-6, 'Cu': 1.62e-8, 'Zn': 3.98e-8}
-        # Normalize abundances to 1: (This should eventually be replaced with self.__normalize_abundances() as well at the end of __init__) 
 
         self.__solar_abundances = {k: v / sum(list(self.__solar_abundances_relH.values())) 
-                                for k, v in self.__solar_abundances_relH.items()}
+                                for k, v in self.__solar_abundances_relH.items()} #Dictionary containing fractional abundances of all 30 elements in solar composition (adding up to 1)
         self.elements = list(self.__solar_abundances.keys()) # List of all 30 elements
 
-        self.abundance_profiles = pd.DataFrame(index=np.logspace(0, np.log10(20), num=1000), 
-                                                columns=self.elements, dtype=float)
+        #Dataframe storing abundance profiles of all 30 elements. Indices are altitudes at which abundances are stored and columns are individual elements.
+        self.abundance_profiles = pd.DataFrame(index=np.logspace(0, np.log10(altmax), num=1000), 
+                                                columns=self.elements, dtype=float) 
 
         self.set_solar() # Start with solar constant composition
 
     def set_solar(self):
+        '''
+        Sets abundances of all elements to the solar composition. Any existing abundance profiles are overwritten.
+        '''
+
         # Set all abundances types to constant w.r.t. hydrogen
         self.abundance_types = {}
         for element in self.elements:
@@ -1699,15 +1645,35 @@ class Abundances:
             self.abundance_profiles[element] = self.__solar_abundances[element]
 
     def __normalize_abundances(self):
-        
+        '''
+        Modifies the abundance_profiles dataframe so that abundances of elements at each altitude add up to 1. 
+        Abundances of fractionated elements are left unchanged, while those of constant are scaled while maintaining their number fraction w.r.t hydrogen.
+        '''
+
+        #For any element 'e' with a constant profile, e' = e * (1-__fractionated_sum)/__constant_sum where e is abundance at 1 Rp and e' is at any other altitude, and __fractionated_sum is the sum of fractional abundances of fractionated elements at that altitude.
         __columns_exclude = [element for element in self.elements if self.abundance_types[element]=='fractionated']
         __constant_df = self.abundance_profiles.loc[:,~self.abundance_profiles.columns.isin(__columns_exclude)]
         __fractionated_df = self.abundance_profiles.loc[:,self.abundance_profiles.columns.isin(__columns_exclude)]
         __constant_sum = (__constant_df.sum(axis=1)).values
         __fractionated_sum = (__fractionated_df.sum(axis=1)).values
+        assert (np.all(__fractionated_sum<1.0)), "The sum of abundances of fractionated elements is exceeding 1. Please check your fractionation power-law index, metallicity, element scale factors and any other changes made to fractionated elements."
         self.abundance_profiles.loc[:, ~self.abundance_profiles.columns.isin(__columns_exclude)] = self.abundance_profiles.loc[:, ~self.abundance_profiles.columns.isin(__columns_exclude)].multiply((1-__fractionated_sum)/__constant_sum, axis=0)
 
     def set_metallicity(self, metallicity=1., scale_factor_dictionary={}, setsolar=True):
+        '''
+        Sets the metallicity and individual element scale factors with respect to solar composition.
+
+        Parameters
+        ----------
+        metallicity : numeric, optional
+            Metallicity relative to solar (in linear units, i.e., z=1 is solar), by default 1.
+        scale_factor_dictionary : dict, optional
+            Dictionary of scale factors for specific elements. For example, {'C':2} to get two times the solar carbon abundance. By default {}.
+            Is not independent of metallicity, i.e. metallicity=5., scale_factor_dictionary={'C':2} would make carbon ten times more abundant than solar.
+        setsolar: bool, optional
+            Whether to revert to solar composition before setting metallicity and/or element scale factors.            
+        '''
+
         if setsolar:
             self.set_solar() # revert to constant solar
         
@@ -1720,11 +1686,19 @@ class Abundances:
             assert isinstance(scale_factor_dictionary[element], (int, float)), "Use single numeric values for the element scale factors."
             self.abundance_profiles[element] *= scale_factor_dictionary[element]
         
-        self.__normalize_abundances() # Normalize to 1 at every radius
+        self.__normalize_abundances() # Normalize fractional abundances to sum to 1 at every altitude
                 
     
     def set_fractionation_powerlaw(self, powerlaw_index_dictionary={}):
-        
+        '''
+        Sets a power-law fractionation profile for elements provided by the user. Any existing fractionation is overwritten, but the element scale factor w.r.t solar is preserved.
+
+        Parameters
+        ----------
+        powerlaw_index_dictionary: dict, optional
+            Dictionary of fractionation power-law indices for specific elements. For example, {'C':-4} for the fractional abundance of carbon to follow a power-law profile with -4 (abundance will be 4 orders lower at altmax). By default {}.
+        '''
+
         assert 'H' not in powerlaw_index_dictionary.keys(), "You cannot fractionate hydrogen, fractionate other elements instead."    
         for element in powerlaw_index_dictionary.keys():
             assert isinstance(powerlaw_index_dictionary[element], (int, float)), "Use single numeric values for the fractionation powerlaw indices."  
@@ -1738,117 +1712,235 @@ class Abundances:
         self.__normalize_abundances() # Normalize to 1 at every radius 
 
     def get_abundance_constant(self, element):
+        '''
+        Returns the fractional abundance of an element. This function can only be used for atmospheres with no fractionation.
+
+        Parameters
+        ----------
+        element: str
+            Element whose fractional abundance is to be returned.
+
+        Returns
+        -------
+        abundance: float
+            Fractional abundance of the element.
+        '''
+
         assert "fractionated" not in self.abundance_types.values(), "At least one element is fractionated. This "\
             "automatically results in non-constant abundance profiles for every element. Use the get_abundance_profile() method instead."
         
         abundance = self.abundance_profiles[element].iloc[0] # Return first value as it is constant anyway
         return abundance
 
-    def get_abundance_profile(self, element='all', grid=None, Rp=None):
+    def get_abundance_profile(self, element='all', grid=None, altmax=None, Rp=None):
         '''
-        Returns the abundance profile or interpolates from Rgrid to Cloudy output grid
-        Rp (or alternatively maybe altmax) is needed to get the corresponding Rgrid to interpolate from Rgrid to Cloudy grid
+        Returns the abundance profile of one or all elements for the complete atmosphere or a custom altitude grid (generally the depth grid in a Cloudy .ovr file)
+        
+        Parameters
+        ----------
+        element: str, optional
+            Element whose abundance profile is to be returned. By default 'all', in which case abundance profiles for all 30 elements is returned.
+        grid: numpy array, optional
+            1D array on which abundance profile(s) of the element(s) is/are to be interpolated onto and returned. This grid is usually the 'depth' column of a Cloudy .ovr file resulting from a simulation. By default None, in which case the grid is the indices of abundance_profiles.
+        altmax: int, optional
+            Maximum altitude in units of planetary radius to which the grid extends. By default None (only allowed if grid is also None).
+        Rp: int, optional
+            Planetary radius in cm. By default None (only allowed if grid is also None).
+
+        Returns
+        -------
+        If no grid is provided, abundance profiles of the specified element or all elements in the complete atmosphere is returned, either as a numpy column stack in the former case or as a dataframe in the latter.
+        If a grid is provided, 
+            abundance_profile_ongrid: pandas.Dataframe 
+                The abundance profiles interpolated onto the given grid.
         '''
-        if grid is None: # Then we return it on the standard (1,20) Rp grid:
+
+        if grid is None: 
             if element == 'all':
                 return self.abundance_profiles
             
             return np.column_stack((self.abundance_profiles.index.values, self.abundance_profiles[element]))
 
         else:
-            assert isinstance(grid, np.ndarray), "Please pass a numpy 1D array as a grid"
+            assert isinstance(grid, np.ndarray) and (grid.ndim==1), "Please pass a numpy 1D array as a grid"
+            assert altmax != None, "If you want to interpolate onto a Cloudy output grid please provide altmax as well"
             assert Rp != None, "If you want to interpolate onto a Cloudy output grid please provide planetary radius in cm as well"
-
-            #get corresponding Rgrid
-            altmax = round(grid[-1]/Rp) + 1
-            __corresponding_Rgrid = altmax * Rp - grid    
+            
+            #Translating Cloudy depth grid to an altitude grid, this should be commented out and interpolation should be done on grid instead of __corresponding_Rgrid if you are giving a custom grid that is already from the bottom of the atmosphere to the top
+            __corresponding_Rgrid = altmax * Rp - grid 
             if element == 'all':
                 abundance_profile_ongrid = pd.DataFrame(index=grid,columns=self.elements)
                 for element in self.elements:
-                    abundance_profile_ongrid[element] = interp1d(self.abundance_profiles.index.values * Rp, self.abundance_profiles[element])(__corresponding_Rgrid)
+                    abundance_profile_ongrid[element] = interp1d(self.abundance_profiles.index.values * Rp, self.abundance_profiles[element])(__corresponding_Rgrid) #abundance_profiles indices are in units of planetary radius, they are multiplied with Rp to match units of grid
             else:
                 abundance_profile_ongrid = pd.DataFrame(index=grid,columns=element)
                 abundance_profile_ongrid = interp1d(self.abundance_profiles.index.values * Rp, self.abundance_profiles[element])(__corresponding_Rgrid)
             return abundance_profile_ongrid
 
-    def get_abundance_dictionary(self): #This function isn't needed anywhere
-        '''
-            Returns dictionary in the form {'H':[0.904,0.903,....],'He':[0.092,0.093....],etc.} 
-        '''
-        return dict((element,self.abundance_profiles[element].values) for element in self.elements)
-
     def get_abundance_constant_Cloudy(self, element):
         '''
-        Used to write constant abundances into Cloudy
+        Returns the fractional abundance of an element with a constant profile. The abundance returned is relative to hydrogen and logarithmic (base 10) as required by Cloudy input files. 
+
+        Parameters
+        ----------
+        element: str
+            Element whose (logarithmic) abundance relative to hydrogen is to be returned. Should have a constant abundance, not fractionated.
+        
+        Returns
+        -------
+        np.log10(abundance_relH): float
+            Base 10 logarithm of fractional abundance of the element relative to hydrogen.
+        -np.inf is returned instead for an element that is absent in the atmosphere.
         '''
+
         assert self.abundance_types[element] == "constant", "This element does not have a constant abundance but is fractionated."
-        if self.abundance_profiles[element].iloc[0] == 0.0:
+        if self.abundance_profiles[element].iloc[0] == 0.0: #Element not present in the atmosphere
             return -np.inf
         else:
-            abundance_relH = self.abundance_profiles[element].iloc[0] / self.abundance_profiles['H'].iloc[0] # convert relative to Hydrogen because that's what Cloudy expects
+            #Only the abundance at the base of the atmosphere is taken as if any element is fractionated, fractional abundances of all elements changes at other altitudes.
+            abundance_relH = self.abundance_profiles[element].iloc[0] / self.abundance_profiles['H'].iloc[0] 
             return np.log10(abundance_relH) # Returns the log of the value!
     
     
-    def get_abundance_profile_Cloudy(self,altmax,Rp,element='all',Npoints=50):
+    def get_abundance_profile_Cloudy(self, altmax, Rp, element='all', Npoints=50):
         '''
-        Used to write abundance profiles for fractionted elements. Can pass a single element or a list. However, if calling multiple times, Npoints should be the same (Cloudy bug)
-        If element is None and there are some fractionated elements, we return for all fractionated. If not, it gives an error (constant abundance atmosphere)
+        Returns the abundances of one or more fractionated elements (or all fractionated elements if element='all') at different altitudes in a particular planetary atmosphere.
+        The abundance profiles are returned relative to hydrogen and logarithmic (base 10) as required by Cloudy input files.
+
+        Parameters
+        ----------
+        altmax: int
+            Maximum altitude in units of planetary radius to which the profile is to be calculated and returned
+        Rp: float
+            Planetary radius in cm
+        element: list, optional
+            Element(s) for which abundance profile is to be returned. The element(s) should have a fractionated profile. By default 'all', in which case abundance profiles for all fractionated elements is returned.
+        Npoints: int, optional
+            Number of points at which abundances are to be evaluated. By default 50.
+        
+        Returns
+        -------
+        abundances_relH_reindexed: pandas.Dataframe
+            Dataframe with containing the abundance profile of the given element(s) (or all fractionated elements). The indices are log (base 10) of altitudes in the planetary atmosphere at which abundances have been interpolated. 
+            The abundances are relative to hydrogen abundances at those altitudes and logarithmic (base 10).
         '''
-        if type(element)==str: #need to make this more robust (move it into the next if and convert to list of separate elements)
-            element = [element]
+
+        if type(element)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            element = element.replace(' ','')
+            element = element.split(',')  
         assert type(element) == list, "Provide a string or list for 'element'"
         if element==['all']:
             element = [ele for ele in self.elements if self.abundance_types[ele]=='fractionated']
             assert element!=[], "No element is fractionated. Use the get_abundance_constant_Cloudy() function instead."
         else:
-            #Need to add code to convert element to list if needed
             for ele in element:
                 assert self.abundance_types[ele] == "fractionated", "This element is not fractionated. Use the get_abundance_constant_Cloudy() function instead."
         
         depth_grid = np.linspace(0, (altmax-1)*Rp, Npoints)
-        corresponding_Rgrid = altmax*Rp - depth_grid
-        depth_grid[0] = 10**-35
+        corresponding_Rgrid = altmax*Rp - depth_grid #Rp to 8Rp (or whatever altmax is) grid, reverse of depth grid essentially
+        depth_grid[0] = 10**-35 #Cloudy requires a grid from the top of atmosphere to planetary surface, starting with a value lower than 10^-30 cm
 
-        abundances_relH = self.abundance_profiles[element].div(self.abundance_profiles['H'],axis=0)
-        abundances_relH_reindexed = pd.DataFrame(index=np.log10(depth_grid),columns=element)
+        abundances_relH = self.abundance_profiles[element].div(self.abundance_profiles['H'],axis=0) #Stores abundances of elements relative to hydrogen
+        abundances_relH_reindexed = pd.DataFrame(index=np.log10(depth_grid),columns=element) #Indices of abundance_profiles is 1....20 (or altmax), needs to be reindexed to depth grid for Cloudy
         for col in abundances_relH.columns:
-            abundances_relH_reindexed[col] = interp1d(self.abundance_profiles.index.values * Rp,abundances_relH[col])(corresponding_Rgrid) #Is there a way to do this without a loop? df.interpolate gives NANs
+            abundances_relH_reindexed[col] = interp1d(self.abundance_profiles.index.values * Rp,abundances_relH[col])(corresponding_Rgrid) 
         abundances_relH_reindexed = np.log10(abundances_relH_reindexed)
 
         return abundances_relH_reindexed
     
-    def get_alaw_Cloudy(self, altmax, Rp):
-        pass # This should return the full alaw dictionary - so internally, it calls get_abundance_profile_Cloudy(), get_abundance_constant_Cloudy()
+    def get_element_scalefactor(self,element,abundance_relH=None):
+        '''
+        Compares the abundance of an element to its abundance in the solar composition and returns the factor by which it has been scaled. 
+
+        Parameters
+        ----------
+        element: str
+            Element whose scale factor is to be returned
+        abundance_relH: float, optional
+            log (base 10) of the abundance of the element relative to hydrogen. By default None, in which case get_abundance_constant_Cloudy is used to calculate this value.
+        '''
+
+        if abundance_relH is None:
+            abundance_relH = self.get_abundance_constant_Cloudy(element)
+        return 10**abundance_relH/self.__solar_abundances_relH[element]
+
+    def get_alaw_Cloudy(self, altmax, Rp, Npoints=50):
+        '''
+        Used to write abundance profiles of elements with non-solar composition to Cloudy input files
+
+        Parameters
+        ----------
+        altmax: int
+            Maximum altitude in units of planetary radius to which fractionated element profiles are to be written.
+        Rp: float
+            Planetary radius in cm
+        Npoints: int, optional
+            Number of points in Cloudy input tables of fractionated elements. By default 50.
+        
+        Returns
+        -------
+        alaw: dict
+            Dictionary containing elements that are scaled and/or fractionated w.r.t solar composition and their corresponding abundances- either a constant or a numpy column stack as fit to be given to Cloudy input files.
+        '''
+
+        alaw = {}
+        for element in self.elements:
+            if self.abundance_types[element] == 'constant':
+                __cloudy_abundance = self.get_abundance_constant_Cloudy(element)
+                if(np.abs(self.get_element_scalefactor(element,__cloudy_abundance)-1)>0.01): #Only elements that have been scaled w.r.t their solar abundances are stored in alaw so as to not have redundant lines in Cloudy input files
+                    alaw[element] = __cloudy_abundance
+            else:
+                __cloudy_abundance = self.get_abundance_profile_Cloudy(altmax,Rp,element,Npoints)
+                alaw[element] = np.column_stack((__cloudy_abundance.index.values, __cloudy_abundance[element].values))
+        return alaw
 
     def set_abundance_profile_Cloudy(self, element, log_depths, log_abundance, altmax, Rp):
         '''
-        Should be used to read from a Cloudy input file and interpolate abundances onto Rgrid
+        Used to construct the abundance profile of a fractionated element from the table in a Cloudy input file. After interpolating onto the 1...20 (or self.altmax) grid, the abundances are normalized to sum to 1.
+
+        Parameters
+        ----------
+        element: str
+            Element whose profile is being constructed.
+        log_depths: np.ndarray
+            Array of depths in the atmosphere. Since this is generally from a Cloudy input file, the points are in log (base 10) form.
+        log_abundance: np.ndarray
+            Abundances of the element at points on the depth grid given. Since this is generally from a Cloudy input file, the abundances are in log (base 10) form and relative to hydrogen.
+        altmax: int
+            Maximum altitude of the atmosphere in units of planetary radius.
+        Rp: float
+            Planetary radius in cm.
         '''
-        log_depths[0] = 0
+
+        log_depths[0] = 0 #In Cloudy input, first point is 10^-35cm
         __corr_Rgrid = altmax*Rp - 10**log_depths
-        __interp_abundances = interp1d(__corr_Rgrid,log_abundance,bounds_error = False,fill_value=(log_abundance[-1],log_abundance[0]))(self.abundance_profiles.index.values * Rp) #Need a more robust fill value
-        __base_scale_factor = self.get_element_scalefactor(element,__interp_abundances[0])
-        tempobj = Abundances()
+        __interp_abundances = interp1d(__corr_Rgrid,log_abundance,bounds_error = False,fill_value=(log_abundance[-1],log_abundance[0]))(self.abundance_profiles.index.values * Rp) 
+        #In case the extent of self.abundance_profiles is larger than input depths, we need to extrapolate for the remainder of the atmosphere. For example, if self goes from 1Rp to 20Rp, while __corr_Rgrid is from 1 to 8Rp, we need to extrapolate from 8Rp to 20Rp. 
+        #This largely shouldn't be necessary as altmax for self.abundance_profiles has been set to match the Cloudy input altmax
+        __base_scale_factor = self.get_element_scalefactor(element,__interp_abundances[0]) 
+        tempobj = Abundances(altmax=altmax)
         tempobj.set_metallicity(1.,{element:__base_scale_factor})
-        self.abundance_profiles[element] = tempobj.abundance_profiles[element].iloc[0]/10**__interp_abundances[0] * 10**__interp_abundances
+        self.abundance_profiles[element] = tempobj.abundance_profiles[element].iloc[0]/10**__interp_abundances[0] * 10**__interp_abundances #__interp_abundances still has abundances relative to hydrogen and in log, this converts to absolute fractional abundances
         self.__normalize_abundances()
 
-    def get_element_scalefactor(self,element,abundance_relH=None):
-        '''
-        Can be used to determine the scale factor of an element w.r.t its solar abundance. This has 2 use cases:
-        1. For writing a general abundance object, all elements with constant abundance that do not have a solar abundance (scale factor not 1) are written into the file.
-        2. While reading from an input file, we can use this function to obtain the scale factor of an element w.r.t solar and therefore update the abundance_profiles.
-        '''
-        if abundance_relH is None:
-            abundance_relH = self.get_abundance_constant_Cloudy(element,write_alaw=False)
-        return 10**abundance_relH/self.__solar_abundances_relH[element]
 
+    def parse_abundances_Cloudy(self,abundances_text,altmax,Rp):        
+        '''
+        Takes all the lines of a (Cloudy input) file containing information about abundances of elements and reconstructs the composition of the atmosphere.
 
-    def parse_abundances_Cloudy(self,abundances_text,altmax, Rp):        
+        Parameters
+        ----------
+        abundances_text: list
+            List of lines from a Cloudy input file that have information about the abundances of elements in the planetary atmosphere. For example ['element lithium abundance -7.69', 'element carbon off']
+        altmax: int
+            Maximum altitude of the atmosphere in units of planetary radius.
+        Rp: float
+            Planetary radius in cm.
+        '''
 
         __scale_factor_dictionary = {}
         for index in range(len(abundances_text)):
-            if 'off' in abundances_text[index]:
+            if 'off' in abundances_text[index]: #element name off implies the element is absent in the atmosphere
                 element = element_symbols[abundances_text[index].split(' ')[1]]
                 self.abundance_types[element] = 'constant'
                 __scale_factor_dictionary[element] = 0.0
@@ -1866,9 +1958,10 @@ class Abundances:
                         break
                     __log_depths.append(float(abundances_text[index2].split(' ')[0]))
                     __log_abundance.append(float(abundances_text[index2].split(' ')[1]))
-                index = index2
-                self.set_abundance_profile_Cloudy(element, np.array(__log_depths[:-1]), np.array(__log_abundance[:-1]), altmax, Rp)
-        self.set_metallicity(1.,__scale_factor_dictionary,False,False)
+                index = index2 #So that the outer loop resumes at the end of the table 
+                self.set_abundance_profile_Cloudy(element, np.array(__log_depths[:-1]), np.array(__log_abundance[:-1]), altmax, Rp) 
+        #After setting abundance profiles of all fractionated elements, constant ones are set and the complete grid is normalized. The setsolar parameter is False so that fractionated elements are not reset to solar composition
+        self.set_metallicity(1.,__scale_factor_dictionary,False) #The input file does not store metallicity, so individual element scale factors are determined and passed instead
 
 
 class Parker:
@@ -1893,10 +1986,9 @@ class Parker:
             with different assumptions such as stellar SED/semi-major axis/composition.
         fH : float, optional
             Hydrogen abundance fraction, in case of a H/He composition, by default None
-        zdict : dict, optional
-            Dictionary with the scale factors of all elements relative
-            to a solar composition. Can be easily created with get_zdict().
-            Default is None, which results in a solar composition.
+        abundances : tools.Abundances, optional
+            Object storing abundances of all thirty elements.
+            Can be easily created with tools.Abundances(). By default None, which results in solar composition.
         SED : str, optional
             Stellar SED name, by default None
         readin : bool, optional
@@ -2226,7 +2318,7 @@ class Sim:
         self.disabled_elements = []
         zelem = {}
         _parker_T, _parker_Mdot, _parker_dir = None, None, None #temp variables
-        __abundances_text = [] #variable to pass to parse_Cloudy to read abundances
+        __abundances_text = [] #Passed to parse_abundances_Cloudy() to construct abundance profiles
         with open(simname+'.in', 'r') as f:
             for line in f:
                 if line[0] == '#': #then it is a comment written by sunbather, extract info:
@@ -2244,7 +2336,7 @@ class Sim:
                     
                     #check if an altmax was defined
                     if 'altmax' in line:
-                        self.altmax = int(line.split('=')[1].strip('\n'))
+                        self.altmax = round(float(line.split('=')[1].strip('\n'))) #typecasting as int leads to error as parker profiles can have altmax like 20.00004 
                 
                 #read SED
                 if 'table SED' in line:
@@ -2260,12 +2352,12 @@ class Sim:
                         if 'end of table' in line.rstrip():
                             break
 
-        #overwrite/set manually given Planet object
-        if planet != None:
-            assert isinstance(planet, Planet)
-            if hasattr(self, 'p'):
-                warnings.warn("I had already read out the Planet object from the .in file, but I will overwrite that with the object you have given.")
-            self.p = planet
+        #overwrite/set manually given Planet object 
+        # if planet != None:
+        #     assert isinstance(planet, Planet)
+        #     if hasattr(self, 'p'):
+        #         warnings.warn("I had already read out the Planet object from the .in file, but I will overwrite that with the object you have given.")
+        #     self.p = planet 
 
         #check if the SED of the Planet object matches the SED of the Cloudy simulation
         if hasattr(self, 'p') and hasattr(self, 'SEDname'):
@@ -2303,9 +2395,9 @@ class Sim:
             _altmax = self.altmax
 
         #set abundances as attribute
-        self.abundances = Abundances()
-        if hasattr(self,'altmax') and hasattr(self, 'p'):
-            self.abundances.parse_abundances_Cloudy(__abundances_text,self.altmax, self.p.R) #Have not tested this within this class, but the function itself should work
+        if hasattr(self, 'altmax') and hasattr(self, 'p'):
+            self.abundances = Abundances(altmax=self.altmax)
+            self.abundances.parse_abundances_Cloudy(__abundances_text, self.altmax, self.p.R) 
         else:
             pass # Decide what to do here - should only happen when not using sunbather-generated Cloudy simulations
         

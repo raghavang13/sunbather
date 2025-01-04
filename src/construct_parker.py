@@ -78,7 +78,9 @@ def calc_neutral_mu(abundances):
 
     Parameters
     ----------
-    WRITE
+    abundances : tools.Abundances
+        Object storing abundances of all thirty elements.
+        Can be easily created with tools.Abundances(). 
 
     Returns
     -------
@@ -263,10 +265,11 @@ def save_temp_parker_profile(planet, Mdot, T, abundances, pdir,
     save_array = np.column_stack((r*planet.R, rho_array*rhos, v_array*vs*1e5, mu_array))
     save_name = tools.projectpath+'/parker_profiles/'+planet.name+'/'+pdir+'/temp/pprof_'+planet.name+'_T='+str(T)+'_M='+"%.3f" %Mdot +".txt"
     abundancestr = "Abundances at planet surface:"
-    if abundances.alaw =={}:
+    alaw = abundances.get_alaw_Cloudy(altmax,planet.R)
+    if alaw =={}:
            abundancestr += " All elements have constant solar composition" 
     else:
-        for element in abundances.alaw:
+        for element in alaw:
             abundancestr += "\n"+element+"="+"%.2e" %abundances.abundance_profiles[element].iloc[0] + "," + abundances.abundance_types[element]
         abundancestr += "\nAll other elements have constant solar composition"
         
