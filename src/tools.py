@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib._color_data as mcd
 import os
 import glob
 import re
@@ -1844,8 +1845,8 @@ class Abundances:
         abundances_relH_reindexed = pd.DataFrame(index=np.log10(depth_grid),columns=element) #Indices of abundance_profiles is 1....20 (or altmax), needs to be reindexed to depth grid for Cloudy
         for col in abundances_relH.columns:
             abundances_relH_reindexed[col] = interp1d(self.abundance_profiles.index.values * Rp,abundances_relH[col])(corresponding_Rgrid) 
-        abundances_relH_reindexed = np.log10(abundances_relH_reindexed)
-
+            abundances_relH_reindexed[abundances_relH_reindexed[col]==0] = 1e-30 #Cloudy does not allow elements to be turned off at only certain depths, so we set a very low value
+        abundances_relH_reindexed = np.log10(abundances_relH_reindexed)        
         return abundances_relH_reindexed
     
     def get_element_scalefactor(self,element,abundance_relH=None):
@@ -1924,7 +1925,7 @@ class Abundances:
         self.__normalize_abundances()
 
 
-    def parse_abundances_Cloudy(self,abundances_text,altmax,Rp):        
+    def parse_abundances_Cloudy(self, abundances_text, altmax, Rp):        
         '''
         Takes all the lines of a (Cloudy input) file containing information about abundances of elements and reconstructs the composition of the atmosphere.
 
@@ -1962,6 +1963,42 @@ class Abundances:
                 self.set_abundance_profile_Cloudy(element, np.array(__log_depths[:-1]), np.array(__log_abundance[:-1]), altmax, Rp) 
         #After setting abundance profiles of all fractionated elements, constant ones are set and the complete grid is normalized. The setsolar parameter is False so that fractionated elements are not reset to solar composition
         self.set_metallicity(1.,__scale_factor_dictionary,False) #The input file does not store metallicity, so individual element scale factors are determined and passed instead
+    
+    #### Miscellaneous functions ####
+    def get_scalesame_dictionary(self, scalevalue, exclude_elements=['H']):
+        '''
+        Can be used to create a dictionary that prescribes same fractionation power-law index or initial scale factor for multiple elements.
+        '''
+        if type(exclude_elements)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            exclude_elements = exclude_elements.replace(' ','')
+            exclude_elements = exclude_elements.split(',')  
+        assert type(exclude_elements) == list, "Provide a string or list for 'exclude_elements'"
+        if 'H' not in exclude_elements:
+            warnings.warn("You cannot scale or fractionate hydrogen, so be wary of using the dictionary returned by this function. Make sure exclude_elements includes 'H' to avoid running into errors if using this dictionary to scale elements or set fractionation profiles.")
+        scalesame_dict_elements = [ele for ele in self.elements if ele not in exclude_elements]
+        scalesame_dict = dict(zip(scalesame_dict_elements,scalevalue*np.ones(len(scalesame_dict_elements))))
+        return scalesame_dict
+    
+    def plot_abundanceprofiles(self,altmax=20,elements='all'):
+        '''
+        Used to plot abundance profiles of one or more elements
+        '''
+        if type(elements)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            elements = elements.replace(' ','')
+            elements = elements.split(',')  
+        assert type(elements) == list, "Provide a string or list for 'elements'"
+        if elements == ['all']:
+            elements = self.elements
+        palette = list(mcd.XKCD_COLORS.values())[::len(elements)]
+        for i,ele in enumerate(elements):
+            plt.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=palette[i],label=ele)
+        xticks = np.linspace(1,altmax,altmax)
+        plt.xticks(xticks)
+        plt.xlim((1,altmax))
+        plt.xlabel('Altitude (Rp)')
+        plt.ylabel('Mixing ratio')
+        plt.legend()
+        plt.show()
 
 
 class Parker:
@@ -2336,8 +2373,9 @@ class Sim:
                     
                     #check if an altmax was defined
                     if 'altmax' in line:
-                        self.altmax = round(float(line.split('=')[1].strip('\n'))) #typecasting as int leads to error as parker profiles can have altmax like 20.00004 
-                
+                        #self.altmax = round(float(line.split('=')[1].strip('\n'))) #typecasting as int leads to error as parker profiles can have altmax like 20.00004 
+                        self.altmax = float(line.split('=')[1].strip('\n'))
+
                 #read SED
                 if 'table SED' in line:
                     self.SEDname = line.split('"')[1]

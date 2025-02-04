@@ -404,7 +404,7 @@ def read_NIST_lines(species, wavlower=None, wavupper=None):
     return spNIST
 
 
-def FinFout(sim, wavsAA, species, numrays=100, width_fac=1., ab=np.zeros(2), phase=0., phase_bulkshift=False, v_turb=0., cut_at=None):
+def FinFout(sim, wavsAA, species, numrays=100, width_fac=1., ab=np.zeros(2), phase=0., phase_bulkshift=False, v_turb=0., cut_at=None,**kwargs):
     """
     Calculates a transit spectrum in units of in-transit flux / out-of-transit flux (i.e., Fin/Fout).
     Only spectral lines originating from provided species will be calculated.
@@ -484,8 +484,8 @@ def FinFout(sim, wavsAA, species, numrays=100, width_fac=1., ab=np.zeros(2), pha
     Te1 = sim.ovr.Te.values[::-1]
     v1 = sim.ovr.v.values[::-1]
 
-    be, _, x, Te = project_1D_to_2D(r1, Te1, Rp, numb=numrays)
-    be, _, x, vx = project_1D_to_2D(r1, v1, Rp, numb=numrays, x_projection=True)
+    be, _, x, Te = project_1D_to_2D(r1, Te1, Rp, numb=numrays,**kwargs)
+    be, _, x, vx = project_1D_to_2D(r1, v1, Rp, numb=numrays, x_projection=True,**kwargs)
 
     if phase_bulkshift:
         assert hasattr(sim.p, 'Kp'), "The Planet object does not have a Kp attribute, likely because either a, Mp or Mstar is unknown"
@@ -538,7 +538,7 @@ def FinFout(sim, wavsAA, species, numrays=100, width_fac=1., ab=np.zeros(2), pha
                 ndens = state_ndens[colname]
             else:
                 ndens1 = sim.den[colname].values[::-1]
-                be, _, x, ndens = project_1D_to_2D(r1, ndens1, Rp, numb=numrays, cut_at=cut_at)
+                be, _, x, ndens = project_1D_to_2D(r1, ndens1, Rp, numb=numrays, cut_at=cut_at,**kwargs)
                 state_ndens[colname] = ndens #add to dictionary for future reference
 
             ndens_lw = ndens*lineweight #important that we make this a new variable as otherwise state_ndens would change as well!
