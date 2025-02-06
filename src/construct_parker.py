@@ -129,7 +129,7 @@ def save_plain_parker_profile(planet, Mdot, T, spectrum, h_fraction=0.9,
         Whether to neglect tidal gravity - fourth term of Eq. 4 of Linssen et al. (2024).
         See also Appendix D of Vissapragada et al. (2022) for the p-winds implementation.
         Default is False, i.e. tidal gravity incluced.
-    altmax : int, optional
+    altmax : numeric, optional
         Maximum altitude of the profile in units of the planet radius. By default 20.
     """
 
@@ -223,7 +223,7 @@ def save_temp_parker_profile(planet, Mdot, T, abundances, pdir,
         Whether to neglect tidal gravity - fourth term of Eq. 4 of Linssen et al. (2024).
         See also Appendix D of Vissapragada et al. (2022) for the p-winds implementation.
         Default is False, i.e. tidal gravity included.
-    altmax : int, optional
+    altmax : numeric, optional
         Maximum altitude of the profile in units of the planet radius. By default 20.
 
     Returns
@@ -262,18 +262,18 @@ def save_temp_parker_profile(planet, Mdot, T, abundances, pdir,
         r_array = r * R_pl / rs
         v_array, rho_array = pw_parker.structure_tidal(r_array, vs, rs, M_pl, Mstar, a)
 
-    save_array = np.column_stack((r*planet.R, rho_array*rhos, v_array*vs*1e5, mu_array))
+    save_array = np.column_stack((r*planet.R, rho_array*rhos, v_array*vs*1e5, mu_array, abundances.abundance_profiles.values))
     save_name = tools.projectpath+'/parker_profiles/'+planet.name+'/'+pdir+'/temp/pprof_'+planet.name+'_T='+str(T)+'_M='+"%.3f" %Mdot +".txt"
     abundancestr = "Abundances at planet surface:"
     alaw = abundances.get_alaw_Cloudy(altmax,planet.R)
-    if alaw =={}:
+    if alaw == {}:
            abundancestr += " All elements have constant solar composition" 
     else:
         for element in alaw:
             abundancestr += "\n"+element+"="+"%.2e" %abundances.abundance_profiles[element].iloc[0] + "," + abundances.abundance_types[element]
         abundancestr += "\nAll other elements have constant solar composition"
         
-    np.savetxt(save_name, save_array, delimiter='\t', header=abundancestr+"\nalt rho v mu")
+    np.savetxt(save_name, save_array, delimiter='\t', header=abundancestr+"\nalt rho v mu "+' '.join(list(abundances.abundance_profiles.columns)))
 
     launch_velocity = v_array[0] #velocity at Rp in units of sonic speed
 
@@ -306,7 +306,7 @@ def run_parker_with_cloudy(filename, T, planet, abundances):
 
     pprof = tools.read_parker('', '', '', '', filename=filename)
 
-    altmax = pprof.alt.iloc[-1] / planet.R #maximum altitude of the profile in units of Rp
+    altmax = round(pprof.alt.iloc[-1] / planet.R,2) #maximum altitude of the profile in units of Rp, rounded to two decimal places so that it matches user-input
     alt = pprof.alt.values
     hden = tools.rho_to_hden(pprof.rho.values, abundances=abundances.abundance_profiles)
     dlaw = tools.alt_array_to_Cloudy(alt, hden, altmax, planet.R, 1000, log=True)
@@ -417,7 +417,7 @@ def save_cloudy_parker_profile(planet, Mdot, T, abundances, pdir,
         Whether to neglect tidal gravity - fourth term of Eq. 4 of Linssen et al. (2024).
         See also Appendix D of Vissapragada et al. (2022) for the p-winds implementation.
         Default is False, i.e. tidal gravity included.
-    altmax : int, optional
+    altmax : numeric, optional
         Maximum altitude of the profile in units of the planet radius. By default 20.
     """
 

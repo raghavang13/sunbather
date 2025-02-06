@@ -110,7 +110,7 @@ def run_s(plname, Mdot, T, itno, fc, dir, SEDname, overwrite, startT, pdir, abun
     abundances : tools.Abundances
         Object storing abundances of all thirty elements.
         Can be easily created with tools.Abundances().
-    altmax : int, optional
+    altmax : numeric, optional
         Maximum altitude of the simulation in units of planet radius, by default 8
     save_sp : list, optional
         A list of atomic/ionic species to let Cloudy save the number density profiles
@@ -280,7 +280,7 @@ def run_g(plname, cores, Mdot_l, Mdot_u, Mdot_s, T_l, T_u, T_s, fc, dir, SEDname
     abundances : tools.Abundances
         Object storing abundances of all thirty elements.
         Can be easily created with tools.Abundances().
-    altmax : int, optional
+    altmax : numeric, optional
         Maximum altitude of the simulation in units of planet radius, by default 8
     save_sp : list, optional
         A list of atomic/ionic species to let Cloudy save the number density profiles

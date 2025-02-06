@@ -801,9 +801,9 @@ def read_parker(plname, T, Mdot, pdir, filename=None):
         Mdot = "%.3f" % float(Mdot)
         T = str(int(T))
         filename = projectpath+'/parker_profiles/'+plname+'/'+pdir+'/pprof_'+plname+'_T='+T+'_M='+Mdot+'.txt'
-
-    pprof = pd.read_table(filename, names=['alt', 'rho', 'v', 'mu'], dtype=np.float64, comment='#')
-    pprof['drhodr'] = np.gradient(pprof['rho'], pprof['alt'])
+    colnames = ['alt', 'rho', 'v', 'mu']+list(Abundances().abundance_profiles.columns) #This sets column names for the parker profiles dataframe, does not work properly currently if some columns are missing
+    pprof = pd.read_table(filename, names=colnames, dtype=np.float64, comment='#')
+    pprof.insert(4,'drhodr', np.gradient(pprof['rho'], pprof['alt']))
 
     return pprof
 
@@ -970,7 +970,7 @@ def set_alt_ax(ax, altmax=8, labels=True):
     ----------
     ax : matplotlib.Axes
         Figure axis to configure.
-    altmax : int, optional
+    altmax : numeric, optional
         Maximum altitude of the simulation in units of planet radius, by default 8.
     labels : bool, optional
         Whether to use an xlabel and xticklabels, by default True
@@ -987,10 +987,10 @@ def set_alt_ax(ax, altmax=8, labels=True):
         ticklabels2 = ["%i" %t for t in np.arange(2, altmax+1, 1).astype(int)]
     elif altmax <= 14:
         ticklabels = ['1', '', '', '', '', '', '', '', '', '', '2', '3', '4', '5', '', '7', '', '', '10']
-        ticklabels2 = ['']*(altmax-10)
+        ticklabels2 = ['']*int((np.ceil(altmax)-10))
     else:
         ticklabels = ['1', '', '', '', '', '', '', '', '', '', '2', '3', '4', '5', '', '7', '', '', '10']
-        ticklabels2 = ['']*(altmax-10)
+        ticklabels2 = ['']*int((np.ceil(altmax)-10))
         ticklabels2b = np.arange(15, altmax+0.1, 5).astype(int)
         index = 4
         for t2b in ticklabels2b:
@@ -1608,7 +1608,7 @@ class Abundances:
 
         Parameters
         ----------
-        altmax : int, optional
+        altmax : numeric, optional
             Maximum altitude of the abundance profiles in units of planet radius, by default 20. 
             Can be set by the user when running simulations, or read from input files of simulations
         '''
@@ -1696,7 +1696,7 @@ class Abundances:
 
         Parameters
         ----------
-        powerlaw_index_dictionary: dict, optional
+        powerlaw_index_dictionary : dict, optional
             Dictionary of fractionation power-law indices for specific elements. For example, {'C':-4} for the fractional abundance of carbon to follow a power-law profile with -4 (abundance will be 4 orders lower at altmax). By default {}.
         '''
 
@@ -1718,12 +1718,12 @@ class Abundances:
 
         Parameters
         ----------
-        element: str
+        element : str
             Element whose fractional abundance is to be returned.
 
         Returns
         -------
-        abundance: float
+        abundance : float
             Fractional abundance of the element.
         '''
 
@@ -1739,20 +1739,20 @@ class Abundances:
         
         Parameters
         ----------
-        element: str, optional
+        element : str, optional
             Element whose abundance profile is to be returned. By default 'all', in which case abundance profiles for all 30 elements is returned.
-        grid: numpy array, optional
+        grid : numpy array, optional
             1D array on which abundance profile(s) of the element(s) is/are to be interpolated onto and returned. This grid is usually the 'depth' column of a Cloudy .ovr file resulting from a simulation. By default None, in which case the grid is the indices of abundance_profiles.
-        altmax: int, optional
+        altmax : numeric, optional
             Maximum altitude in units of planetary radius to which the grid extends. By default None (only allowed if grid is also None).
-        Rp: int, optional
+        Rp : int, optional
             Planetary radius in cm. By default None (only allowed if grid is also None).
 
         Returns
         -------
         If no grid is provided, abundance profiles of the specified element or all elements in the complete atmosphere is returned, either as a numpy column stack in the former case or as a dataframe in the latter.
         If a grid is provided, 
-            abundance_profile_ongrid: pandas.Dataframe 
+            abundance_profile_ongrid : pandas.Dataframe 
                 The abundance profiles interpolated onto the given grid.
         '''
 
@@ -1784,7 +1784,7 @@ class Abundances:
 
         Parameters
         ----------
-        element: str
+        element : str
             Element whose (logarithmic) abundance relative to hydrogen is to be returned. Should have a constant abundance, not fractionated.
         
         Returns
@@ -1810,13 +1810,13 @@ class Abundances:
 
         Parameters
         ----------
-        altmax: int
+        altmax : numeric
             Maximum altitude in units of planetary radius to which the profile is to be calculated and returned
-        Rp: float
+        Rp : float
             Planetary radius in cm
-        element: list, optional
+        element : list, optional
             Element(s) for which abundance profile is to be returned. The element(s) should have a fractionated profile. By default 'all', in which case abundance profiles for all fractionated elements is returned.
-        Npoints: int, optional
+        Npoints : int, optional
             Number of points at which abundances are to be evaluated. By default 50.
         
         Returns
@@ -1855,9 +1855,9 @@ class Abundances:
 
         Parameters
         ----------
-        element: str
+        element : str
             Element whose scale factor is to be returned
-        abundance_relH: float, optional
+        abundance_relH : float, optional
             log (base 10) of the abundance of the element relative to hydrogen. By default None, in which case get_abundance_constant_Cloudy is used to calculate this value.
         '''
 
@@ -1871,19 +1871,20 @@ class Abundances:
 
         Parameters
         ----------
-        altmax: int
+        altmax : numeric
             Maximum altitude in units of planetary radius to which fractionated element profiles are to be written.
-        Rp: float
+        Rp : float
             Planetary radius in cm
-        Npoints: int, optional
+        Npoints : int, optional
             Number of points in Cloudy input tables of fractionated elements. By default 50.
         
         Returns
         -------
-        alaw: dict
+        alaw : dict
             Dictionary containing elements that are scaled and/or fractionated w.r.t solar composition and their corresponding abundances- either a constant or a numpy column stack as fit to be given to Cloudy input files.
         '''
 
+        self.__normalize_abundances() #To ensure abundances are normalized (in-case changes have been made to object without normalizing)
         alaw = {}
         for element in self.elements:
             if self.abundance_types[element] == 'constant':
@@ -1901,15 +1902,15 @@ class Abundances:
 
         Parameters
         ----------
-        element: str
+        element : str
             Element whose profile is being constructed.
-        log_depths: np.ndarray
+        log_depths : np.ndarray
             Array of depths in the atmosphere. Since this is generally from a Cloudy input file, the points are in log (base 10) form.
-        log_abundance: np.ndarray
+        log_abundance : np.ndarray
             Abundances of the element at points on the depth grid given. Since this is generally from a Cloudy input file, the abundances are in log (base 10) form and relative to hydrogen.
-        altmax: int
+        altmax : numeric
             Maximum altitude of the atmosphere in units of planetary radius.
-        Rp: float
+        Rp : float
             Planetary radius in cm.
         '''
 
@@ -1931,11 +1932,11 @@ class Abundances:
 
         Parameters
         ----------
-        abundances_text: list
+        abundances_text : list
             List of lines from a Cloudy input file that have information about the abundances of elements in the planetary atmosphere. For example ['element lithium abundance -7.69', 'element carbon off']
-        altmax: int
+        altmax : numeric
             Maximum altitude of the atmosphere in units of planetary radius.
-        Rp: float
+        Rp : float
             Planetary radius in cm.
         '''
 
@@ -1979,7 +1980,7 @@ class Abundances:
         scalesame_dict = dict(zip(scalesame_dict_elements,scalevalue*np.ones(len(scalesame_dict_elements))))
         return scalesame_dict
     
-    def plot_abundanceprofiles(self,altmax=20,elements='all'):
+    def plot_abundanceprofiles(self, altmax=20, elements='all',log=False):
         '''
         Used to plot abundance profiles of one or more elements
         '''
@@ -1990,14 +1991,19 @@ class Abundances:
         if elements == ['all']:
             elements = self.elements
         palette = list(mcd.XKCD_COLORS.values())[::len(elements)]
+        fig, ax = plt.subplots(1) 
         for i,ele in enumerate(elements):
-            plt.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=palette[i],label=ele)
-        xticks = np.linspace(1,altmax,altmax)
-        plt.xticks(xticks)
-        plt.xlim((1,altmax))
-        plt.xlabel('Altitude (Rp)')
-        plt.ylabel('Mixing ratio')
-        plt.legend()
+            ax.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=palette[i],label=ele)
+        set_alt_ax(ax=ax, altmax=altmax)
+        #xticks = np.linspace(1,altmax,altmax)
+        #plt.xticks(xticks)
+        #plt.xlim((1,altmax))
+        #plt.xlabel('Altitude (Rp)')
+        #plt.ylabel('Mixing ratio')
+        if log:
+            ax.set_yscale('log')
+        ax.set_ylabel('Mixing Ratio')
+        ax.legend()
         plt.show()
 
 
@@ -2300,7 +2306,7 @@ class Sim:
         ----------
         simname : str
             Full path + simulation name excluding file extension.
-        altmax : int, optional
+        altmax : numeric, optional
             Maximum altitude of the simulation in units of the planet radius. Will also
             be automatically read from the input file if written as a comment. By default None.
         proceedFail : bool, optional
@@ -2353,7 +2359,6 @@ class Sim:
 
         #read the .in file to extract some sim info like changes to the chemical composition and altmax
         self.disabled_elements = []
-        zelem = {}
         _parker_T, _parker_Mdot, _parker_dir = None, None, None #temp variables
         __abundances_text = [] #Passed to parse_abundances_Cloudy() to construct abundance profiles
         with open(simname+'.in', 'r') as f:
@@ -2422,6 +2427,8 @@ class Sim:
                 raise TypeError("altmax must be set to a float or int") #can it actually be a float? I'm not sure if the code can handle it - check and try.
             if hasattr(self, 'altmax'):
                 if self.altmax != altmax:
+                    print('self.altmax:',self.altmax)
+                    print('\naltmax:',altmax)
                     warnings.warn("I read the altmax from the .in file, but the value you have explicitly passed is different. " \
                             "I will use your value, but please make sure it is correct.")
             self.altmax = altmax
