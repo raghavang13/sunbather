@@ -1448,6 +1448,7 @@ def write_Cloudy_in(simname, title=None, flux_scaling=None,
                         f.write("\nelement "+element_names[element]+" abundance "+'{:.2f}'.format(alaw[element]))
                             
                 elif (isinstance(alaw[element], np.ndarray)):
+                    alaw[element] = remove_duplicates(alaw[element], "1.7f")
                     f.write("\n# ======= " + element_names[element] + " fractionation law ====")
                     f.write("\nelement " + element_names[element] + " table depth\n" )
                     np.savetxt(f,alaw[element],fmt='%1.7f')
@@ -1828,7 +1829,7 @@ class Abundances:
 
         if type(element)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
             element = element.replace(' ','')
-            element = element.split(',')  
+            element = element.split(',') 
         assert type(element) == list, "Provide a string or list for 'element'"
         if element==['all']:
             element = [ele for ele in self.elements if self.abundance_types[ele]=='fractionated']
@@ -1884,6 +1885,9 @@ class Abundances:
             Dictionary containing elements that are scaled and/or fractionated w.r.t solar composition and their corresponding abundances- either a constant or a numpy column stack as fit to be given to Cloudy input files.
         '''
 
+        assert list(Abundances().abundance_profiles.columns.difference(self.abundance_profiles.columns)) == [], "One or more elements in the abundance_profiles dataframe of the abundances object is missing."\
+        " If you would like to remove some elements from the atmosphere, use the set_metallicity function in class Abundances."
+        
         self.__normalize_abundances() #To ensure abundances are normalized (in-case changes have been made to object without normalizing)
         alaw = {}
         for element in self.elements:

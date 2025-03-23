@@ -18,7 +18,6 @@ import multiprocessing
 import traceback
 import warnings
 
-
 def cloudy_spec_to_pwinds(SEDfilename, dist_SED, dist_planet):
     """
     Reads a spectrum file in the format that we give it to Cloudy, namely
@@ -176,7 +175,6 @@ def save_plain_parker_profile(planet, Mdot, T, spectrum, h_fraction=0.9,
         r_array = r * R_pl / rs
         v_array, rho_array = pw_parker.structure_tidal(r_array, vs, rs, M_pl, Mstar, a)
     mu_array = ((1-h_fraction)*4.0 + h_fraction)/(h_fraction*(1+f_r)+(1-h_fraction)) #this assumes no Helium ionization
-
     save_array = np.column_stack((r*planet.R, rho_array*rhos, v_array*vs*1e5, mu_array))
     np.savetxt(save_name, save_array, delimiter='\t', header=f"hydrogen fraction: {h_fraction:.3f}\nalt rho v mu")
     print("Parker wind profile done:", save_name)
@@ -264,8 +262,9 @@ def save_temp_parker_profile(planet, Mdot, T, abundances, pdir,
 
     save_array = np.column_stack((r*planet.R, rho_array*rhos, v_array*vs*1e5, mu_array, abundances.abundance_profiles.values))
     save_name = tools.projectpath+'/parker_profiles/'+planet.name+'/'+pdir+'/temp/pprof_'+planet.name+'_T='+str(T)+'_M='+"%.3f" %Mdot +".txt"
+    sonicradiusstr = "Sonic radius:" + str(rs)
     abundancestr = "Abundances at planet surface:"
-    alaw = abundances.get_alaw_Cloudy(altmax,planet.R)
+    alaw = abundances.get_alaw_Cloudy(altmax,planet.R,Npoints=10000)
     if alaw == {}:
            abundancestr += " All elements have constant solar composition" 
     else:
@@ -273,7 +272,7 @@ def save_temp_parker_profile(planet, Mdot, T, abundances, pdir,
             abundancestr += "\n"+element+"="+"%.2e" %abundances.abundance_profiles[element].iloc[0] + "," + abundances.abundance_types[element]
         abundancestr += "\nAll other elements have constant solar composition"
         
-    np.savetxt(save_name, save_array, delimiter='\t', header=abundancestr+"\nalt rho v mu "+' '.join(list(abundances.abundance_profiles.columns)))
+    np.savetxt(save_name, save_array, delimiter='\t', header=sonicradiusstr + "\n" + abundancestr+"\nalt rho v mu "+' '.join(list(abundances.abundance_profiles.columns)))
 
     launch_velocity = v_array[0] #velocity at Rp in units of sonic speed
 
@@ -310,7 +309,7 @@ def run_parker_with_cloudy(filename, T, planet, abundances):
     alt = pprof.alt.values
     hden = tools.rho_to_hden(pprof.rho.values, abundances=abundances.abundance_profiles)
     dlaw = tools.alt_array_to_Cloudy(alt, hden, altmax, planet.R, 1000, log=True)
-    alaw = abundances.get_alaw_Cloudy(altmax, planet.R)
+    alaw = abundances.get_alaw_Cloudy(altmax, planet.R,Npoints=10000)
 
     nuFnu_1AU_linear, Ryd = tools.get_SED_norm_1AU(planet.SEDname)
     nuFnu_a_log = np.log10(nuFnu_1AU_linear / ((planet.a - altmax*planet.R)/tools.AU)**2)
@@ -426,7 +425,7 @@ def save_cloudy_parker_profile(planet, Mdot, T, abundances, pdir,
     if os.path.exists(save_name) and not overwrite:
         print("Parker profile already exists and overwrite = False:", planet.name, pdir, "%.3f" %Mdot, T)
         return #this quits the function but if we're running a grid, it doesn't quit the whole Python code
-
+    
     tools.verbose_print("Making initial parker profile while assuming a completely neutral mu_bar...", verbose=verbose)
     neutral_mu_bar = calc_neutral_mu(abundances=abundances.abundance_profiles)
     neutral_mu_struc = np.array([[1., neutral_mu_bar[0]], [altmax, neutral_mu_bar[0]]]) #set up an array with constant mu(r) at the neutral value
