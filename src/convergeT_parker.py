@@ -156,6 +156,7 @@ def run_s(plname, Mdot, T, itno, fc, dir, SEDname, overwrite, startT, pdir, abun
     hden = tools.rho_to_hden(pprof.rho.values, abundances=abundances.abundance_profiles)
     dlaw = tools.alt_array_to_Cloudy(alt, hden, altmax, planet.R, 1000, log=True)
     alaw = abundances.get_alaw_Cloudy(altmax, planet.R,Npoints=10000)
+    #alaw = abundances.get_alaw_Cloudy(altmax, planet.R,Npoints=100)
 
     nuFnu_1AU_linear, Ryd = tools.get_SED_norm_1AU(planet.SEDname)
     nuFnu_a_log = np.log10(nuFnu_1AU_linear / ((planet.a - altmax*planet.R)/tools.AU)**2)

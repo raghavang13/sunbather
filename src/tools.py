@@ -1646,7 +1646,7 @@ class Abundances:
         for element in self.elements:
             self.abundance_profiles[element] = self.__solar_abundances[element]
 
-    def __normalize_abundances(self):
+    def normalize_abundances(self):
         '''
         Modifies the abundance_profiles dataframe so that abundances of elements at each altitude add up to 1. 
         Abundances of fractionated elements are left unchanged, while those of constant are scaled while maintaining their number fraction w.r.t hydrogen.
@@ -1688,7 +1688,7 @@ class Abundances:
             assert isinstance(scale_factor_dictionary[element], (int, float)), "Use single numeric values for the element scale factors."
             self.abundance_profiles[element] *= scale_factor_dictionary[element]
         
-        self.__normalize_abundances() # Normalize fractional abundances to sum to 1 at every altitude
+        self.normalize_abundances() # Normalize fractional abundances to sum to 1 at every altitude
                 
     
     def set_fractionation_powerlaw(self, powerlaw_index_dictionary={}):
@@ -1711,7 +1711,7 @@ class Abundances:
             self.abundance_profiles[element] = self.abundance_profiles[element] * (self.abundance_profiles.index.values ** powerlaw_index_dictionary[element])
             self.abundance_types[element] = "fractionated"
 
-        self.__normalize_abundances() # Normalize to 1 at every radius 
+        self.normalize_abundances() # Normalize to 1 at every radius 
 
     def get_abundance_constant(self, element):
         '''
@@ -1888,7 +1888,7 @@ class Abundances:
         assert list(Abundances().abundance_profiles.columns.difference(self.abundance_profiles.columns)) == [], "One or more elements in the abundance_profiles dataframe of the abundances object is missing."\
         " If you would like to remove some elements from the atmosphere, use the set_metallicity function in class Abundances."
         
-        self.__normalize_abundances() #To ensure abundances are normalized (in-case changes have been made to object without normalizing)
+        self.normalize_abundances() #To ensure abundances are normalized (in-case changes have been made to object without normalizing)
         alaw = {}
         for element in self.elements:
             if self.abundance_types[element] == 'constant':
@@ -1927,7 +1927,7 @@ class Abundances:
         tempobj = Abundances(altmax=altmax)
         tempobj.set_metallicity(1.,{element:__base_scale_factor})
         self.abundance_profiles[element] = tempobj.abundance_profiles[element].iloc[0]/10**__interp_abundances[0] * 10**__interp_abundances #__interp_abundances still has abundances relative to hydrogen and in log, this converts to absolute fractional abundances
-        self.__normalize_abundances()
+        self.normalize_abundances()
 
 
     def parse_abundances_Cloudy(self, abundances_text, altmax, Rp):        
@@ -2009,6 +2009,65 @@ class Abundances:
         ax.set_ylabel('Mixing Ratio')
         ax.legend()
         plt.show()
+
+
+class Fractionation:
+
+    def __init__(self,simname):
+        
+        self.sim = Sim(simname)
+        self.planet = self.sim.p
+        self.Mp = self.planet.M
+        self.abundance_profiles = self.sim.abundances.get_abundance_profile(grid=self.sim.ovr.depth.values,altmax=self.sim.altmax,Rp=self.planet.R)
+        self.abundance_profiles.index = self.sim.ovr.alt.values / self.sim.ovr.alt.values[-1]
+        self.abundance_profiles = self.abundance_profiles[::-1]
+        self.ovr = self.sim.ovr[::-1]
+        self.rs = self.ovr.alt.values[0]
+        self.__create_fractionationdf()
+        self.set_nofrac()
+        self.sigmad = 2.58 #Approximate collisional cross section
+        self.calc_b()
+    
+    def __create_fractionationdf(self):
+
+        self.fractionation_df = pd.DataFrame(index=self.ovr.alt.values, dtype=float) 
+        self.fractionation_df['Te'] = self.ovr.Te.values
+        self.fractionation_df['g'] = G * self.Mp / (self.fractionation_df.index.values)**2
+
+    def set_nofrac(self):
+
+        self.elements = list(self.abundance_profiles.columns)
+        for element in self.elements:
+            self.fractionation_df['n_'+element] = self.ovr.hden.values / self.abundance_profiles['H'].values * self.abundance_profiles[element].values
+            if (np.all(self.abundance_profiles[element].values)):
+                self.fractionation_df['w_'+element] = self.ovr.v.values
+            else:
+                self.fractionation_df['w_'+element] = 0
+    
+    def calc_b(self, ioncorrection = True):
+
+        self.b_df = pd.DataFrame(index=self.ovr.alt.values, dtype=float)
+        self.b_df['Te'] = self.ovr.Te.values
+        bHHe_neutral = 1.04e18 * self.b_df['Te'].values**0.732
+        nuHeH = 10.6e-10
+        const = bHHe_neutral * self.sigmad**2 / np.sqrt(1/get_mass('H')+get_mass('He'))
+        if ioncorrection is True:
+            self.b_df['H_He'] = 1 / ((1-self.ovr.HII.values) / (bHHe_neutral) + self.ovr.HII.values * get_mass('H') * nuHeH / (k *self.b_df['Te'].values))
+        else:
+            self.b_df['H_He'] = 1.04e18 * self.b_df['Te'].values**0.732
+        for element in self.elements[2:]:
+            if ioncorrection is True:
+                muHele = get_mass('H') * get_mass(element) / (get_mass('H') + get_mass(element))
+                muHHe = get_mass('H') * get_mass('He') / (get_mass('H') + get_mass('He'))
+                mufactor = np.sqrt(muHele/muHHe)
+                bHele_neutral = const / self.sigmad**2 * np.sqrt(1/get_mass('H')+1/get_mass(element))
+                self.b_df['H_'+element] = 1 / ((1-self.ovr.HII.values) / (bHele_neutral) + self.ovr.HII.values * get_mass('H') * mufactor * nuHeH / (k *self.b_df['Te'].values))
+                
+            else:
+                self.b_df['H_'+element] = const / self.sigmad**2 * np.sqrt(1/get_mass('H')+1/get_mass(element)) 
+            
+        
+
 
 
 class Parker:
