@@ -7,6 +7,7 @@ import glob
 import re
 from shutil import copyfile
 from scipy.interpolate import interp1d
+from scipy.integrate import solve_ivp
 from scipy.signal import savgol_filter
 import scipy.stats as sps
 from scipy.ndimage import gaussian_filter1d
@@ -1984,7 +1985,7 @@ class Abundances:
         scalesame_dict = dict(zip(scalesame_dict_elements,scalevalue*np.ones(len(scalesame_dict_elements))))
         return scalesame_dict
     
-    def plot_abundanceprofiles(self, altmax=20, elements='all',log=False):
+    def plot_abundanceprofiles(self, altmax=20, elements='all', log=False):
         '''
         Used to plot abundance profiles of one or more elements
         '''
@@ -2022,17 +2023,20 @@ class Fractionation:
         self.abundance_profiles.index = self.sim.ovr.alt.values / self.sim.ovr.alt.values[-1]
         self.abundance_profiles = self.abundance_profiles[::-1]
         self.ovr = self.sim.ovr[::-1]
-        self.rs = self.ovr.alt.values[0]
+        self.r = self.ovr.alt.values
+        self.rs = self.r[0]
         self.__create_fractionationdf()
         self.set_nofrac()
         self.sigmad = 2.58 #Approximate collisional cross section
-        self.calc_b()
+        self.set_b()
     
     def __create_fractionationdf(self):
 
-        self.fractionation_df = pd.DataFrame(index=self.ovr.alt.values, dtype=float) 
+        self.fractionation_df = pd.DataFrame(index=self.ovr.alt.values, dtype=float)
+        self.fractionation_df['Sim_MassFlux'] = self.ovr.rho.values * self.ovr.v.values 
         self.fractionation_df['Te'] = self.ovr.Te.values
         self.fractionation_df['g'] = G * self.Mp / (self.fractionation_df.index.values)**2
+        self.fractionation_df['neutral_mu'] = calc_mu(1.,0,abundances=self.abundance_profiles,mass=True)
 
     def set_nofrac(self):
 
@@ -2040,33 +2044,145 @@ class Fractionation:
         for element in self.elements:
             self.fractionation_df['n_'+element] = self.ovr.hden.values / self.abundance_profiles['H'].values * self.abundance_profiles[element].values
             if (np.all(self.abundance_profiles[element].values)):
-                self.fractionation_df['w_'+element] = self.ovr.v.values
+                self.fractionation_df['v_'+element] = self.ovr.v.values
+                self.fractionation_df['phi_'+element] = self.fractionation_df['n_'+element].values * self.fractionation_df['v_'+element].values * (self.fractionation_df.index.values / self.rs)**2
+                self.fractionation_df['Hscale_'+element] = k * self.fractionation_df['Te'].values / (get_mass(element) * self.fractionation_df['g'].values)
+
             else:
-                self.fractionation_df['w_'+element] = 0
+                self.fractionation_df['v_'+element] = 0
+                self.fractionation_df['phi_'+element] = 0
+                self.fractionation_df['Hscale_'+element] = None
+            
+            self.fractionation_df = self.fractionation_df.copy() #To avert Performance Warning: DataFrame is highly fragmented
     
-    def calc_b(self, ioncorrection = True):
+    def set_b(self, ioncorrection = True):
 
         self.b_df = pd.DataFrame(index=self.ovr.alt.values, dtype=float)
         self.b_df['Te'] = self.ovr.Te.values
-        bHHe_neutral = 1.04e18 * self.b_df['Te'].values**0.732
-        nuHeH = 10.6e-10
-        const = bHHe_neutral * self.sigmad**2 / np.sqrt(1/get_mass('H')+get_mass('He'))
+        __bHHe_neutral = 1.04e18 * self.b_df.Te.values**0.732
+        __nuHeH = 10.6e-10
+        __const = __bHHe_neutral * self.sigmad**2 / np.sqrt(1/get_mass('H')+get_mass('He'))
         if ioncorrection is True:
-            self.b_df['H_He'] = 1 / ((1-self.ovr.HII.values) / (bHHe_neutral) + self.ovr.HII.values * get_mass('H') * nuHeH / (k *self.b_df['Te'].values))
+            self.b_df['H_He'] = 1 / ((1-self.ovr.HII.values) / (__bHHe_neutral) + self.ovr.HII.values * get_mass('H') * __nuHeH / (k *self.b_df['Te'].values))
         else:
-            self.b_df['H_He'] = 1.04e18 * self.b_df['Te'].values**0.732
+            self.b_df['H_He'] = 1.04e18 * self.b_df.Te.values**0.732
         for element in self.elements[2:]:
             if ioncorrection is True:
-                muHele = get_mass('H') * get_mass(element) / (get_mass('H') + get_mass(element))
-                muHHe = get_mass('H') * get_mass('He') / (get_mass('H') + get_mass('He'))
-                mufactor = np.sqrt(muHele/muHHe)
-                bHele_neutral = const / self.sigmad**2 * np.sqrt(1/get_mass('H')+1/get_mass(element))
-                self.b_df['H_'+element] = 1 / ((1-self.ovr.HII.values) / (bHele_neutral) + self.ovr.HII.values * get_mass('H') * mufactor * nuHeH / (k *self.b_df['Te'].values))
+                __muHele = get_mass('H') * get_mass(element) / (get_mass('H') + get_mass(element))
+                __muHHe = get_mass('H') * get_mass('He') / (get_mass('H') + get_mass('He'))
+                __mufactor = np.sqrt(__muHele/__muHHe)
+                bHele_neutral = __const / self.sigmad**2 * np.sqrt(1/get_mass('H')+1/get_mass(element))
+                self.b_df['H_'+element] = 1 / ((1-self.ovr.HII.values) / (bHele_neutral) + self.ovr.HII.values * get_mass('H') * __mufactor * __nuHeH / (k *self.b_df['Te'].values))
                 
             else:
-                self.b_df['H_'+element] = const / self.sigmad**2 * np.sqrt(1/get_mass('H')+1/get_mass(element)) 
-            
+                self.b_df['H_'+element] = __const / self.sigmad**2 * np.sqrt(1/get_mass('H')+1/get_mass(element)) 
+    
+    def estimate_fluxfrac(self, elements='all', modify_df=False):
+
+        if type(elements)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            elements = elements.replace(' ','')
+            elements = elements.split(',')  
+        assert type(elements) == list, "Provide a string or list for 'elements'"
+        if elements == ['all']:
+            elements = self.elements
+        if 'H' in elements:
+            elements.remove('H')
+        self.critical_flux = {'H':None}
+        self.fluxratio_estimate = {}
+        self.velratio_estimate = {}
+        for element in elements:
+            if np.all(self.fractionation_df['n_'+element].values): 
+                self.critical_flux[element] = self.b_df['H_'+element].values[0] * self.abundance_profiles['H'].values[0] *(get_mass(element)-get_mass('H')) / (self.fractionation_df['Hscale_H'].values[0])
+            else: #Element absent in atmosphere
+                self.critical_flux[element] = None
         
+        for element in elements:
+            __phi_base = self.fractionation_df['Sim_MassFlux'].values[0]
+            if self.critical_flux[element] is not None:
+                if(__phi_base < self.critical_flux[element]):
+                    self.fluxratio_estimate[element] = 0
+                    self.velratio_estimate[element] = 0
+                else:
+                    __x1 = self.abundance_profiles['H'].values[0]
+                    __x2 = self.abundance_profiles[element].values[0]
+                    __phi_d_1 = self.b_df['H_'+element].values[0] / self.fractionation_df['Hscale_H'].values[0]
+                    __phi_d_2 = self.b_df['H_'+element].values[0] / self.fractionation_df['Hscale_'+element].values[0]
+                    __mbar = self.fractionation_df['neutral_mu'].values[0]
+                    __phi_2 = (__x2 * __phi_base + __x1 * __x2 * (get_mass('H') - get_mass(element)) * __phi_d_1) / __mbar 
+                    __phi_1 = (__x1 * __phi_base + __x1 * __x2 * (get_mass(element) - get_mass('H')) * __phi_d_2) / __mbar
+                    #Here I use neutral mean molecular weight of simulation, rather than that of an atmosphere with just hydrogen and this element as neglecting Helium is probably a large error
+                    #Need to check this, and add a warning to not use this function for a three or n element atmosphere where hydrogen number fraction is comparable to heavier elements
+                    self.fluxratio_estimate[element] = __phi_2 / __phi_1
+                    self.velratio_estimate[element] = self.fluxratio_estimate[element] * self.fractionation_df['n_H'].values[0] / self.fractionation_df['n_'+element].values[0]
+                
+            if modify_df is True:
+
+                self.fractionation_df['phi_'+element] = self.fractionation_df['phi_H'] * self.fluxratio_estimate[element]
+                self.fractionation_df['v_'+element] = self.fractionation_df['v_H'] * self.velratio_estimate[element]
+
+
+    def __ngrad(self, r, n, b, rs, phi1, phi2, H1, H2):
+
+        n1, n2 = n
+        return np.array([1/b(r) * rs**2 / r**2 * (phi2(r) * n1 - phi1(r) * n2) - n1 / H1(r), 1/b(r) * rs**2 / r**2 * (phi1(r) * n2 - phi2(r) * n1) - n2 / H2(r)])
+    
+    def solve_nprofile(self, element, use_estimate=True, setnofrac=False, modify_n=True):
+
+        if setnofrac is True:
+            self.set_nofrac()
+        
+        if use_estimate is True: #Users can give custom phi if they don't want to use estimate_fluxfrac
+            self.estimate_fluxfrac(elements=element, modify_df=True)
+
+        __b_ODE = interp1d(x = self.r, y = self.b_df['H_'+element])
+        __phi1_ODE = interp1d(x = self.r, y = self.fractionation_df['phi_H'])
+        __phi2_ODE = interp1d(x = self.r, y = self.fractionation_df['phi_'+element]) 
+        __H1_ODE = interp1d(x = self.r, y = self.fractionation_df['Hscale_H'])
+        __H2_ODE = interp1d(x = self.r, y = self.fractionation_df['Hscale_'+element])
+
+        __nden_0 = [self.fractionation_df['n_H'].values[0], self.fractionation_df['n_'+element].values[0]]
+
+        __nsol = solve_ivp(fun=self.__ngrad, t_span = [self.rs, self.r[-1]], y0=__nden_0, t_eval=self.r, args=(__b_ODE,self.rs,__phi1_ODE,__phi2_ODE,__H1_ODE,__H2_ODE))
+
+        __x = __nsol.t
+        __n2 = __nsol.y[1]
+
+        if modify_n is True:
+            self.fractionation_df['n_'+element] = interp1d(x=__x, y=__n2, bounds_error=False, fill_value=(__n2[0],__n2[-1]))(self.r)
+
+        return __nsol
+
+    def __x2grad(self, r, x2, b, rs, phi1, phi2, g, T, element):
+
+        return x2 * (1/b(r) * rs**2 / r**2 * (phi1(r) - phi2(r) * (1-x2)/x2) + g(r) / (k * T(r)) * (get_mass('H') - get_mass(element)) * (1-x2))
+
+    def solve_x2profile(self, element, use_estimate=True, modify_x=False, setnofrac=False):
+
+        if setnofrac is False:
+            self.set_nofrac()
+
+        if use_estimate is True: #Should only be true in the first iteration
+           self.estimate_fluxfrac(elements=element, modify_df=True)
+         
+        __b_ODE = interp1d(x = self.r, y = self.b_df['H_'+element])
+        __phi1_ODE = interp1d(x = self.r, y = self.fractionation_df['phi_H'])
+        __phi2_ODE = interp1d(x = self.r, y = self.fractionation_df['phi_'+element]) 
+        __g_ODE = interp1d(x = self.r, y = self.fractionation_df['g'])
+        __T_ODE = interp1d(x = self.r, y = self.fractionation_df['Te'])
+
+        __x2_0 = [self.abundance_profiles[element].values[0]]
+
+        __x2sol = solve_ivp(fun=self.__x2grad, t_span=[self.rs, self.r[-1]], y0=__x2_0, t_eval=self.r, args=(__b_ODE, self.rs,__phi1_ODE,__phi2_ODE, __g_ODE, __T_ODE, element))
+        x = __x2sol.t
+        x2 = __x2sol.y[0]
+
+        if modify_x is True:
+            self.abundance_profiles[element] = interp1d(x=x, y=x2, bounds_error=False, fill_value = (x2[0], x2[-1]))(self.r)
+
+        return __x2sol
+
+    #def converge_velratio(self, element, ini_guess='estimate', max_Hscale = iterations=20):
+
 
 
 
