@@ -1642,7 +1642,8 @@ class Abundances:
         # Set all abundances types to constant w.r.t. hydrogen
         self.abundance_types = {}
         self.rlower = dict.fromkeys(self.__solar_abundances_relH.keys(),1.0)
-        self.rupper = dict.fromkeys(self.__solar_abundances_relH,1.0) #might make more sense to also set this to altmax
+        self.rupper = dict.fromkeys(self.__solar_abundances_relH,1.0) #might make more sense to also set this to altmax or None
+        self.fracrange = dict.fromkeys(self.__solar_abundances_relH,None) 
         for element in self.elements:
             self.abundance_types[element] = "constant"
 
@@ -2019,20 +2020,99 @@ class Abundances:
 
         self.rlower[element] = rlower
         self.rupper[element] = rupper
+        self.fracrange[element] = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
 
-    def frac_powerlaw(self, element, powerlaw_index):
+    def frac_powerlaw(self, element, powerlaw_index=None, finval=None, fraction=True):
 
-        __frac_range = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
-        self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles[element][__frac_range[0]] * (__frac_range**powerlaw_index)
-        self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles[element][__frac_range[-1]]
+        #Need to implement with final value as an option as well
+        assert powerlaw_index is None or finval is None, "Please provide either the final mixing ratio or the power-law index, not both"
+        if finval is not None:
+            if fraction is True:
+                finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element]
+            powerlaw_index = np.log10(finval / self.abundance_profiles.loc[self.fracrange[element][0], element]) / np.log10(self.fracrange[element][-1])
+
+        self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] * ((self.fracrange[element] / self.fracrange[element][0])**powerlaw_index)
+        self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles.loc[self.fracrange[element][-1], element]
         self.abundance_types[element] = 'fractionated'
 
-    def frac_expdecay(self, element, const):
+    def frac_expdecay(self, element, const=None, finval=None, fraction=True):
 
-        __frac_range = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
-        self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles[element][__frac_range[0]] * np.exp(const * np.diff(__frac_range, prepend=__frac_range[0]))
-        self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles[element][__frac_range[-1]]
+        assert const is None or finval is None, "Please provide either the final mixing ratio or the decay constant, not both"
+        if finval is not None:
+            if fraction is True:
+                finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element]
+            const = np.log(finval / self.abundance_profiles.loc[self.fracrange[element][0], element]) / self.fracrange[element][-1]
+        
+        self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] * np.exp(const * (self.fracrange[element] - self.fracrange[element][0]))
+        self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles.loc[self.fracrange[element][-1], element]
         self.abundance_types[element] = 'fractionated'
+
+    def frac_strline(self, element, finval=None, slope=None, fraction=True):
+
+        assert finval is None or slope is None, "Please provide either the final mixing ratio or the slope of the line, not both"
+        if finval is not None and fraction is True:
+            finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element]
+        if finval is not None:
+            slope = (finval - self.abundance_profiles.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
+            self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
+            self.abundance_profiles.loc[self.rupper[element]:, element] = finval
+
+        else:
+            self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
+            finval = self.abundance_profiles.loc[self.fracrange[element][-1], element]
+            assert finval > 0, "The final mixing ratio is negative, please choose a smaller (less negative) value of slope"
+            self.abundance_profiles.loc[self.rupper[element]:, element] = finval
+        
+        self.abundance_types[element] = 'fractionated'
+
+    def frac_ellipse(self, element, finval, fraction=True):
+
+        if fraction is True:
+            finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element] 
+        
+        __h = self.rlower[element] #(h,k) is the centre of the ellipse
+        __k = finval
+        __a = self.rupper[element] - self.rlower[element]
+        __b = self.abundance_profiles.loc[self.fracrange[element][0], element] - __k
+        self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = __k + __b * np.sqrt(1 - (self.fracrange[element] - __h)**2 / __a**2)
+        self.abundance_profiles.loc[self.rupper[element]:, element] = finval
+        self.abundance_types[element] = 'fractionated'
+
+    def frac_parabola(self, element, vertex_r, finval, fraction=True):
+
+        if fraction is True:
+            finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element] 
+        
+        __h = vertex_r
+        __a = (self.abundance_profiles.loc[self.fracrange[element][0], element] - finval) / ((self.fracrange[element][0] - __h)**2 - (self.fracrange[element][-1] - __h)**2)
+        __k = finval - __a * (self.fracrange[element][-1] - __h)**2
+
+        self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = __a * (self.fracrange[element] - __h)**2 + __k
+        assert np.all(self.abundance_profiles[element]>0) , "The abundance of " +str(element) + "is negative at some points, please choose a different value for vertex_r and/or finval"
+        self.abundance_profiles.loc[self.rupper[element]:, element] = finval
+        self.abundance_types[element] = 'fractionated'
+
+    def frac_npowerlaws(self, element, break_locations, powerlaws):
+
+        #Make sure powerlaws is one longer than break_locations
+        fracrange=[]
+        for i in range(len(break_locations)):
+            if i==0:
+                fracrange.append(self.abundance_profiles[self.rlower[element]:break_locations[i]].index.values)
+            else:
+                fracrange.append(self.abundance_profiles[break_locations[i-1]:break_locations[i]].index.values)
+        fracrange.append(self.abundance_profiles[break_locations[-1]:self.rupper[element]].index.values)
+
+        for i in range(len(fracrange)):
+
+            if i==0:
+                self.abundance_profiles.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_profiles.loc[fracrange[i][0], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i])
+            else:
+                self.abundance_profiles.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_profiles.loc[fracrange[i-1][-1], element] * ((fracrange[i] / fracrange[i-1][-1])**powerlaws[i])
+
+        self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles.loc[fracrange[-1][-1], element]
+        self.abundance_types[element] = 'fractionated'
+
 
 
 class Fractionation:
@@ -2222,7 +2302,8 @@ class Fractionation:
             __complete_eledf = pd.concat([self.lowercoupled_simdf[element], self.decoupled_simdf[element], self.uppercoupled_simdf[element]])
             self.fracdf[['n_'+element, 'v_'+element, 'NumFlux_'+element]] = __complete_eledf[['n_'+element, 'v_'+element, 'NumFlux_'+element]]
             self.frac_abundances[element] = self.fracdf['n_'+element] / (self.fracdf['n_'+element] + self.fracdf['n_H'])
-            
+
+
 
 
     
