@@ -802,7 +802,7 @@ def read_parker(plname, T, Mdot, pdir, filename=None):
         Mdot = "%.3f" % float(Mdot)
         T = str(int(T))
         filename = projectpath+'/parker_profiles/'+plname+'/'+pdir+'/pprof_'+plname+'_T='+T+'_M='+Mdot+'.txt'
-    colnames = ['alt', 'rho', 'v', 'mu']+list(Abundances().abundance_profiles.columns) #This sets column names for the parker profiles dataframe, does not work properly currently if some columns are missing
+    colnames = ['alt', 'rho', 'v', 'mu']+list(Abundances2().abundance_profiles.columns) #This sets column names for the parker profiles dataframe, does not work properly currently if some columns are missing
     pprof = pd.read_table(filename, names=colnames, dtype=np.float64, comment='#')
     pprof.insert(4,'drhodr', np.gradient(pprof['rho'], pprof['alt']))
 
@@ -842,7 +842,7 @@ def calc_mu(rho, ne, abundances=None, mass=False):
     """
 
     if abundances is None:
-        abundances = Abundances().abundance_profiles
+        abundances = Abundances2().abundance_profiles
 
     sum_all = 0.
     for element in abundances.columns:
@@ -883,7 +883,7 @@ def rho_to_hden(rho, abundances=None):
     """
 
     if abundances is None:
-        abundances = Abundances().abundance_profiles #get a solar composition
+        abundances = Abundances2().abundance_profiles #get a solar composition
 
     sum_all = 0.
     for element in abundances.columns:
@@ -923,7 +923,7 @@ def hden_to_rho(hden, abundances=None):
     """
 
     if abundances is None:
-        abundances = Abundances().abundance_profiles #get a solar composition
+        abundances = Abundances2().abundance_profiles #get a solar composition
 
     sum_all = 0.
     for element in abundances.columns:
@@ -1598,6 +1598,576 @@ def insertden_Cloudy_in(simname, denspecies, selected_den_levels=True, rerun=Fal
 #######################################
 ###########     CLASSES     ###########
 #######################################
+class Abundances2:
+    '''
+    Class that stores the abundance profiles of the elements in a planetary atmosphere. Contains methods to modify these profiles.
+    '''
+
+    def __init__(self, altmax=20):
+        '''
+        Sets the initial (solar) abundance profile of the atmosphere upto a particular altitude (altmax)
+
+        Parameters
+        ----------
+        altmax : numeric, optional
+            Maximum altitude of the abundance profiles in units of planet radius, by default 20. 
+            Can be set by the user when running simulations, or read from input files of simulations
+        '''
+
+        # from Hazy Table 7.1:
+        self.__solar_abundances_relH = {'H': 1., 'He': 0.1, 'Li': 2.04e-9, 'Be': 2.63e-11, 'B': 6.17e-10,
+                                'C': 2.45e-4, 'N': 8.51e-5, 'O': 4.9e-4, 'F': 3.02e-8, 'Ne': 1e-4,
+                                'Na': 2.14e-6, 'Mg': 3.47e-5, 'Al': 2.95e-6, 'Si': 3.47e-5, 'P': 3.2e-7,
+                                'S': 1.84e-5, 'Cl': 1.91e-7, 'Ar': 2.51e-6, 'K': 1.32e-7, 'Ca': 2.29e-6,
+                                'Sc': 1.48e-9, 'Ti': 1.05e-7, 'V': 1e-8, 'Cr': 4.68e-7, 'Mn': 2.88e-7,
+                                'Fe': 2.82e-5, 'Co': 8.32e-8, 'Ni': 1.78e-6, 'Cu': 1.62e-8, 'Zn': 3.98e-8}
+
+        self.__solar_abundances = {k: v / sum(list(self.__solar_abundances_relH.values())) 
+                                for k, v in self.__solar_abundances_relH.items()} #Dictionary containing fractional abundances of all 30 elements in solar composition (adding up to 1)
+        self.elements = list(self.__solar_abundances.keys()) # List of all 30 elements
+
+        #Dataframe storing abundance profiles of all 30 elements. Indices are altitudes at which abundances are stored and columns are individual elements.
+        self.abundance_profiles = pd.DataFrame(index=np.logspace(0, np.log10(altmax), num=1000), 
+                                                columns=self.elements, dtype=float) 
+        self.abundance_relH = pd.DataFrame(index=np.logspace(0, np.log10(altmax), num=1000), 
+                                                columns=self.elements, dtype=float) 
+        self.set_solar() # Start with solar constant composition
+        
+    def __update_abundance_relH(self):
+
+        self.abundance_relH = self.abundance_profiles.div(self.abundance_profiles['H'], axis=0)    
+
+    def set_solar(self):
+        '''
+        Sets abundances of all elements to the solar composition. Any existing abundance profiles are overwritten.
+        '''
+
+        # Set all abundances types to constant w.r.t. hydrogen
+        self.abundance_types = {}
+        self.rlower = dict.fromkeys(self.__solar_abundances_relH.keys(),1.0)
+        self.rupper = dict.fromkeys(self.__solar_abundances_relH,1.0) #might make more sense to also set this to altmax or None
+        self.fracrange = dict.fromkeys(self.__solar_abundances_relH,None)
+        self.lowercoupled = dict.fromkeys(self.__solar_abundances_relH,None)
+        self.uppercoupled = dict.fromkeys(self.__solar_abundances_relH,None)
+        for element in self.elements:
+            self.abundance_types[element] = "constant"
+
+        # Initially at constant solar composition:
+        for element in self.elements:
+            self.abundance_profiles[element] = self.__solar_abundances[element]
+        
+        self.__update_abundance_relH()
+        
+    def normalize_abundances(self):
+
+        self.abundance_profiles = self.abundance_relH.div(self.abundance_relH.sum(axis=1).values, axis=0)
+
+    
+    def set_metallicity(self, metallicity=1., scale_factor_dictionary={}, setsolar=True):
+        '''
+        Sets the metallicity and individual element scale factors with respect to solar composition.
+
+        Parameters
+        ----------
+        metallicity : numeric, optional
+            Metallicity relative to solar (in linear units, i.e., z=1 is solar), by default 1.
+        scale_factor_dictionary : dict, optional
+            Dictionary of scale factors for specific elements. For example, {'C':2} to get two times the solar carbon abundance. By default {}.
+            Is not independent of metallicity, i.e. metallicity=5., scale_factor_dictionary={'C':2} would make carbon ten times more abundant than solar.
+        setsolar: bool, optional
+            Whether to revert to solar composition before setting metallicity and/or element scale factors.            
+        '''
+
+        if setsolar:
+            self.set_solar() # revert to constant solar
+        
+        for element in self.elements:
+            if element not in ['H', 'He']:
+                self.abundance_profiles[element] *= metallicity # Multiply with metallicity at all radii
+                
+        for element in scale_factor_dictionary:
+            assert 'H' not in scale_factor_dictionary.keys(), "You cannot scale hydrogen, scale everything else instead."
+            assert isinstance(scale_factor_dictionary[element], (int, float)), "Use single numeric values for the element scale factors."
+            self.abundance_profiles[element] *= scale_factor_dictionary[element]
+        
+        self.__update_abundance_relH()        
+        self.normalize_abundances() # Normalize fractional abundances to sum to 1 at every altitude
+    
+    
+    def get_abundance_constant(self, element):
+        '''
+        Returns the fractional abundance of an element. This function can only be used for atmospheres with no fractionation.
+
+        Parameters
+        ----------
+        element : str
+            Element whose fractional abundance is to be returned.
+
+        Returns
+        -------
+        abundance : float
+            Fractional abundance of the element.
+        '''
+
+        assert "fractionated" not in self.abundance_types.values(), "At least one element is fractionated. This "\
+            "automatically results in non-constant abundance profiles for every element. Use the get_abundance_profile() method instead."
+        
+        abundance = self.abundance_profiles[element].iloc[0] # Return first value as it is constant anyway
+        return abundance
+
+    def get_abundance_profile(self, element='all', grid=None, altmax=None, Rp=None):
+        '''
+        Returns the abundance profile of one or all elements for the complete atmosphere or a custom altitude grid (generally the depth grid in a Cloudy .ovr file)
+        
+        Parameters
+        ----------
+        element : str, optional
+            Element whose abundance profile is to be returned. By default 'all', in which case abundance profiles for all 30 elements is returned.
+        grid : numpy array, optional
+            1D array on which abundance profile(s) of the element(s) is/are to be interpolated onto and returned. This grid is usually the 'depth' column of a Cloudy .ovr file resulting from a simulation. By default None, in which case the grid is the indices of abundance_profiles.
+        altmax : numeric, optional
+            Maximum altitude in units of planetary radius to which the grid extends. By default None (only allowed if grid is also None).
+        Rp : int, optional
+            Planetary radius in cm. By default None (only allowed if grid is also None).
+
+        Returns
+        -------
+        If no grid is provided, abundance profiles of the specified element or all elements in the complete atmosphere is returned, either as a numpy column stack in the former case or as a dataframe in the latter.
+        If a grid is provided, 
+            abundance_profile_ongrid : pandas.Dataframe 
+                The abundance profiles interpolated onto the given grid.
+        '''
+
+        if grid is None: 
+            if element == 'all':
+                return self.abundance_profiles
+            
+            return np.column_stack((self.abundance_profiles.index.values, self.abundance_profiles[element]))
+
+        else:
+            assert isinstance(grid, np.ndarray) and (grid.ndim==1), "Please pass a numpy 1D array as a grid"
+            assert altmax != None, "If you want to interpolate onto a Cloudy output grid please provide altmax as well"
+            assert Rp != None, "If you want to interpolate onto a Cloudy output grid please provide planetary radius in cm as well"
+            
+            #Translating Cloudy depth grid to an altitude grid, this should be commented out and interpolation should be done on grid instead of __corresponding_Rgrid if you are giving a custom grid that is already from the bottom of the atmosphere to the top
+            __corresponding_Rgrid = altmax * Rp - grid 
+            if element == 'all':
+                abundance_profile_ongrid = pd.DataFrame(index=grid,columns=self.elements)
+                for element in self.elements:
+                    abundance_profile_ongrid[element] = interp1d(self.abundance_profiles.index.values * Rp, self.abundance_profiles[element])(__corresponding_Rgrid) #abundance_profiles indices are in units of planetary radius, they are multiplied with Rp to match units of grid
+            else:
+                abundance_profile_ongrid = pd.DataFrame(index=grid,columns=element)
+                abundance_profile_ongrid = interp1d(self.abundance_profiles.index.values * Rp, self.abundance_profiles[element])(__corresponding_Rgrid)
+            return abundance_profile_ongrid
+
+    def get_abundance_constant_Cloudy(self, element):
+        '''
+        Returns the fractional abundance of an element with a constant profile. The abundance returned is relative to hydrogen and logarithmic (base 10) as required by Cloudy input files. 
+
+        Parameters
+        ----------
+        element : str
+            Element whose (logarithmic) abundance relative to hydrogen is to be returned. Should have a constant abundance, not fractionated.
+        
+        Returns
+        -------
+        np.log10(abundance_relH): float
+            Base 10 logarithm of fractional abundance of the element relative to hydrogen.
+        -np.inf is returned instead for an element that is absent in the atmosphere.
+        '''
+
+        assert self.abundance_types[element] == "constant", "This element does not have a constant abundance but is fractionated."
+        if self.abundance_relH[element].iloc[0] == 0.0: #Element not present in the atmosphere
+            return -np.inf
+        else:
+            #Only the abundance at the base of the atmosphere is taken as if any element is fractionated, fractional abundances of all elements changes at other altitudes.
+            return np.log10(self.abundance_relH[element].iloc[0]) # Returns the log of the value!
+    
+    
+    def get_abundance_profile_Cloudy(self, altmax, Rp, element='all', Npoints=50):
+        '''
+        Returns the abundances of one or more fractionated elements (or all fractionated elements if element='all') at different altitudes in a particular planetary atmosphere.
+        The abundance profiles are returned relative to hydrogen and logarithmic (base 10) as required by Cloudy input files.
+
+        Parameters
+        ----------
+        altmax : numeric
+            Maximum altitude in units of planetary radius to which the profile is to be calculated and returned
+        Rp : float
+            Planetary radius in cm
+        element : list, optional
+            Element(s) for which abundance profile is to be returned. The element(s) should have a fractionated profile. By default 'all', in which case abundance profiles for all fractionated elements is returned.
+        Npoints : int, optional
+            Number of points at which abundances are to be evaluated. By default 50.
+        
+        Returns
+        -------
+        abundances_relH_reindexed: pandas.Dataframe
+            Dataframe with containing the abundance profile of the given element(s) (or all fractionated elements). The indices are log (base 10) of altitudes in the planetary atmosphere at which abundances have been interpolated. 
+            The abundances are relative to hydrogen abundances at those altitudes and logarithmic (base 10).
+        '''
+
+        if type(element)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            element = element.replace(' ','')
+            element = element.split(',') 
+        assert type(element) == list, "Provide a string or list for 'element'"
+        if element==['all']:
+            element = [ele for ele in self.elements if self.abundance_types[ele]=='fractionated']
+            assert element!=[], "No element is fractionated. Use the get_abundance_constant_Cloudy() function instead."
+        else:
+            for ele in element:
+                assert self.abundance_types[ele] == "fractionated", "This element is not fractionated. Use the get_abundance_constant_Cloudy() function instead."
+        
+        depth_grid = np.linspace(0, (altmax-1)*Rp, Npoints)
+        corresponding_Rgrid = altmax*Rp - depth_grid #Rp to 8Rp (or whatever altmax is) grid, reverse of depth grid essentially
+        depth_grid[0] = 10**-35 #Cloudy requires a grid from the top of atmosphere to planetary surface, starting with a value lower than 10^-30 cm
+
+        abundances_relH = self.abundance_relH[element]
+        abundances_relH_reindexed = pd.DataFrame(index=np.log10(depth_grid),columns=element) #Indices of abundance_profiles is 1....20 (or altmax), needs to be reindexed to depth grid for Cloudy
+        for col in abundances_relH.columns:
+            abundances_relH_reindexed[col] = interp1d(self.abundance_relH.index.values * Rp,abundances_relH[col])(corresponding_Rgrid) 
+            abundances_relH_reindexed[abundances_relH_reindexed[col]==0] = 1e-30 #Cloudy does not allow elements to be turned off at only certain depths, so we set a very low value
+        abundances_relH_reindexed = np.log10(abundances_relH_reindexed)        
+        return abundances_relH_reindexed
+    
+    def get_element_scalefactor(self,element,abundance_relH=None):
+        '''
+        Compares the abundance of an element to its abundance in the solar composition and returns the factor by which it has been scaled. 
+
+        Parameters
+        ----------
+        element : str
+            Element whose scale factor is to be returned
+        abundance_relH : float, optional
+            log (base 10) of the abundance of the element relative to hydrogen. By default None, in which case get_abundance_constant_Cloudy is used to calculate this value.
+        '''
+
+        if abundance_relH is None:
+            abundance_relH = self.get_abundance_constant_Cloudy(element)
+        return 10**abundance_relH/self.__solar_abundances_relH[element]
+
+    def get_alaw_Cloudy(self, altmax, Rp, Npoints=50):
+        '''
+        Used to write abundance profiles of elements with non-solar composition to Cloudy input files
+
+        Parameters
+        ----------
+        altmax : numeric
+            Maximum altitude in units of planetary radius to which fractionated element profiles are to be written.
+        Rp : float
+            Planetary radius in cm
+        Npoints : int, optional
+            Number of points in Cloudy input tables of fractionated elements. By default 50.
+        
+        Returns
+        -------
+        alaw : dict
+            Dictionary containing elements that are scaled and/or fractionated w.r.t solar composition and their corresponding abundances- either a constant or a numpy column stack as fit to be given to Cloudy input files.
+        '''
+
+        assert list(Abundances2().abundance_profiles.columns.difference(self.abundance_profiles.columns)) == [], "One or more elements in the abundance_profiles dataframe of the abundances object is missing."\
+        " If you would like to remove some elements from the atmosphere, use the set_metallicity function in class Abundances."
+        
+        self.normalize_abundances() #To ensure abundances are normalized (in-case changes have been made to object without normalizing)
+        alaw = {}
+        for element in self.elements:
+            if self.abundance_types[element] == 'constant':
+                __cloudy_abundance = self.get_abundance_constant_Cloudy(element)
+                if(np.abs(self.get_element_scalefactor(element,__cloudy_abundance)-1)>0.01): #Only elements that have been scaled w.r.t their solar abundances are stored in alaw so as to not have redundant lines in Cloudy input files
+                    alaw[element] = __cloudy_abundance
+            else:
+                __cloudy_abundance = self.get_abundance_profile_Cloudy(altmax,Rp,element,Npoints)
+                alaw[element] = np.column_stack((__cloudy_abundance.index.values, __cloudy_abundance[element].values))
+        return alaw
+
+    def set_abundance_profile_Cloudy(self, element, log_depths, log_abundance, altmax, Rp):
+        '''
+        Used to construct the abundance profile of a fractionated element from the table in a Cloudy input file. After interpolating onto the 1...20 (or self.altmax) grid, the abundances are normalized to sum to 1.
+
+        Parameters
+        ----------
+        element : str
+            Element whose profile is being constructed.
+        log_depths : np.ndarray
+            Array of depths in the atmosphere. Since this is generally from a Cloudy input file, the points are in log (base 10) form.
+        log_abundance : np.ndarray
+            Abundances of the element at points on the depth grid given. Since this is generally from a Cloudy input file, the abundances are in log (base 10) form and relative to hydrogen.
+        altmax : numeric
+            Maximum altitude of the atmosphere in units of planetary radius.
+        Rp : float
+            Planetary radius in cm.
+        '''
+
+        log_depths[0] = 0 #In Cloudy input, first point is 10^-35cm
+        __corr_Rgrid = altmax*Rp - 10**log_depths
+        __interp_abundances = interp1d(__corr_Rgrid,log_abundance,bounds_error = False,fill_value=(log_abundance[-1],log_abundance[0]))(self.abundance_profiles.index.values * Rp) 
+        #In case the extent of self.abundance_profiles is larger than input depths, we need to extrapolate for the remainder of the atmosphere. For example, if self goes from 1Rp to 20Rp, while __corr_Rgrid is from 1 to 8Rp, we need to extrapolate from 8Rp to 20Rp. 
+        #This largely shouldn't be necessary as altmax for self.abundance_profiles has been set to match the Cloudy input altmax
+        #__base_scale_factor = self.get_element_scalefactor(element,__interp_abundances[0]) 
+        #tempobj = Abundances(altmax=altmax)
+        #tempobj.set_metallicity(1.,{element:__base_scale_factor})
+        #self.abundance_profiles[element] = tempobj.abundance_profiles[element].iloc[0]/10**__interp_abundances[0] * 10**__interp_abundances #__interp_abundances still has abundances relative to hydrogen and in log, this converts to absolute fractional abundances
+        self.abundance_relH[element] = 10 ** __interp_abundances
+        #self.normalize_abundances()
+
+
+    def parse_abundances_Cloudy(self, abundances_text, altmax, Rp):        
+        '''
+        Takes all the lines of a (Cloudy input) file containing information about abundances of elements and reconstructs the composition of the atmosphere.
+
+        Parameters
+        ----------
+        abundances_text : list
+            List of lines from a Cloudy input file that have information about the abundances of elements in the planetary atmosphere. For example ['element lithium abundance -7.69', 'element carbon off']
+        altmax : numeric
+            Maximum altitude of the atmosphere in units of planetary radius.
+        Rp : float
+            Planetary radius in cm.
+        '''
+
+        __scale_factor_dictionary = {}
+        for index in range(len(abundances_text)):
+            if 'off' in abundances_text[index]: #element name off implies the element is absent in the atmosphere
+                element = element_symbols[abundances_text[index].split(' ')[1]]
+                self.abundance_types[element] = 'constant'
+                #__scale_factor_dictionary[element] = 0.0
+                self.abundance_relH[element] = 0.0
+            
+            elif 'abundance' in abundances_text[index]:
+                element = element_symbols[abundances_text[index].split(' ')[1]]
+                self.abundance_types[element] = 'constant'
+                #__scale_factor_dictionary[element] = self.get_element_scalefactor(element,float(abundances_text[index].split(' ')[3]))
+                self.abundance_relH[element] = 10 ** float(abundances_text[index].split(' ')[3])
+            
+            elif 'element' in abundances_text[index] and 'table depth' in abundances_text[index]:
+                element = element_symbols[abundances_text[index].split(' ')[1]]
+                self.abundance_types[element] = 'fractionated'
+                __log_depths = []
+                __log_abundance = []
+                for index2 in range(index+1, len(abundances_text)):
+                    if 'end of table' in abundances_text[index2]:
+                        break
+                    __log_depths.append(float(abundances_text[index2].split(' ')[0]))
+                    __log_abundance.append(float(abundances_text[index2].split(' ')[1]))
+                index = index2 #So that the outer loop resumes at the end of the table 
+                self.set_abundance_profile_Cloudy(element, np.array(__log_depths[:-1]), np.array(__log_abundance[:-1]), altmax, Rp) 
+        #After setting abundance profiles of all fractionated elements, constant ones are set and the complete grid is normalized. The setsolar parameter is False so that fractionated elements are not reset to solar composition
+        #self.set_metallicity(1.,__scale_factor_dictionary,False) #The input file does not store metallicity, so individual element scale factors are determined and passed instead
+        self.normalize_abundances()
+    
+    #### Miscellaneous functions ####
+    def get_scalesame_dictionary(self, scalevalue, exclude_elements=['H']):
+        '''
+        Can be used to create a dictionary that prescribes same fractionation power-law index or initial scale factor for multiple elements.
+        '''
+        if type(exclude_elements)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            exclude_elements = exclude_elements.replace(' ','')
+            exclude_elements = exclude_elements.split(',')  
+        assert type(exclude_elements) == list, "Provide a string or list for 'exclude_elements'"
+        if 'H' not in exclude_elements:
+            warnings.warn("You cannot scale or fractionate hydrogen, so be wary of using the dictionary returned by this function. Make sure exclude_elements includes 'H' to avoid running into errors if using this dictionary to scale elements or set fractionation profiles.")
+        scalesame_dict_elements = [ele for ele in self.elements if ele not in exclude_elements]
+        scalesame_dict = dict(zip(scalesame_dict_elements,scalevalue*np.ones(len(scalesame_dict_elements))))
+        return scalesame_dict
+    
+    def plot_abundanceprofiles(self, altmax=20, elements='all', log=False, relH=False):
+        '''
+        Used to plot abundance profiles of one or more elements
+        '''
+        if type(elements)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            elements = elements.replace(' ','')
+            elements = elements.split(',')  
+        assert type(elements) == list, "Provide a string or list for 'elements'"
+        if elements == ['all']:
+            elements = self.elements
+        palette = list(mcd.XKCD_COLORS.values())[::len(elements)]
+        fig, ax = plt.subplots(1) 
+        for i,ele in enumerate(elements):
+            if relH is False:
+                ax.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=palette[i],label=ele)
+            else:
+                ax.plot(self.abundance_relH.index.values,self.abundance_relH[ele],color=palette[i],label=ele)
+        set_alt_ax(ax=ax, altmax=altmax)
+        #xticks = np.linspace(1,altmax,altmax)
+        #plt.xticks(xticks)
+        #plt.xlim((1,altmax))
+        #plt.xlabel('Altitude (Rp)')
+        #plt.ylabel('Mixing ratio')
+        if log is True : 
+            ax.set_yscale('log')
+        if relH is False:
+            ax.set_ylabel('Mixing Ratio')
+        else:
+            ax.set_ylabel('Mixing Ratio (relative to hydrogen)')
+        ax.legend()
+        plt.show()
+    
+
+    #### Fractionation profiles ####
+    def set_fracboundary(self, element, rlower, rupper):
+
+        assert element!='H', "Hydrogen cannot be fractionated"
+        self.rlower[element] = rlower
+        self.rupper[element] = rupper
+        self.fracrange[element] = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
+        self.lowercoupled[element] = self.abundance_profiles[:self.rlower[element]].index.values #I have these 2 for consistency with class Fractionation, but don't use them anywhere for building profiles
+        self.uppercoupled[element] = self.abundance_profiles[self.rupper[element]:].index.values
+    
+    def fractionation_powerlaw(self, powerlaw_index_dictionary={}): #May be an obsolete function
+        '''
+        Sets a power-law fractionation profile for elements provided by the user. Any existing fractionation is overwritten, but the element scale factor w.r.t solar is preserved.
+
+        Parameters
+        ----------
+        powerlaw_index_dictionary : dict, optional
+            Dictionary of fractionation power-law indices for specific elements. For example, {'C':-4} for the fractional abundance of carbon to follow a power-law profile with -4 (abundance will be 4 orders lower at altmax). By default {}.
+        '''
+        #Leaving this for now, need to change it if we go with the new normalization type
+        assert 'H' not in powerlaw_index_dictionary.keys(), "You cannot fractionate hydrogen, fractionate other elements instead."    
+        for element in powerlaw_index_dictionary.keys():
+            assert isinstance(powerlaw_index_dictionary[element], (int, float)), "Use single numeric values for the fractionation powerlaw indices."  
+            if self.abundance_types[element] == "fractionated":
+                warnings.warn(f"You're trying to set a powerlaw fractionation profile for {element}, but this element already " \
+                                "has a fractionated profile. We will use the current abundance at 1 Rp and construct a powerlaw from that point.")
+                
+            self.abundance_profiles[element] = self.abundance_profiles[element] * (self.abundance_profiles.index.values ** powerlaw_index_dictionary[element])
+            self.abundance_types[element] = "fractionated"
+
+        self.normalize_abundances() # Normalize to 1 at every radius 
+
+
+    def frac_powerlaw(self, element, powerlaw_index=None, finval=None, fraction=True, return_powerlawindex = False):
+
+        assert powerlaw_index is None or finval is None, "Please provide either the final mixing ratio or the power-law index, not both"
+        if finval is not None:
+            if fraction is True:
+                finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
+            if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+            powerlaw_index = np.log10(finval / self.abundance_relH.loc[self.fracrange[element][0], element]) / np.log10(self.fracrange[element][-1] / self.fracrange[element][0])
+
+        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] * ((self.fracrange[element] / self.fracrange[element][0])**powerlaw_index)
+        self.abundance_relH.loc[self.rupper[element]:, element] = self.abundance_relH.loc[self.fracrange[element][-1], element]
+        self.abundance_types[element] = 'fractionated'
+        self.normalize_abundances()
+
+        if return_powerlawindex is True:
+            return powerlaw_index
+
+    def frac_expdecay(self, element, const=None, finval=None, fraction=True, return_const=False):
+
+        assert const is None or finval is None, "Please provide either the final mixing ratio or the decay constant, not both"
+        if finval is not None:
+            if fraction is True:
+                finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
+            if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+            const = np.log(finval / self.abundance_relH.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
+    
+        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] * np.exp(const * (self.fracrange[element] - self.fracrange[element][0]))
+        self.abundance_relH.loc[self.rupper[element]:, element] = self.abundance_relH.loc[self.fracrange[element][-1], element]
+        self.abundance_types[element] = 'fractionated'
+        self.normalize_abundances()
+
+        if return_const is True:
+            return const
+
+    def frac_strline(self, element, finval=None, slope=None, fraction=True, return_slope=False):
+
+        assert finval is None or slope is None, "Please provide either the final mixing ratio or the slope of the line, not both"
+        if finval is not None and fraction is True:
+            finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
+        if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+        if finval is not None:
+            slope = (finval - self.abundance_relH.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
+            self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
+            self.abundance_relH.loc[self.rupper[element]:, element] = finval
+
+        else:
+            self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
+            finval = self.abundance_relH.loc[self.fracrange[element][-1], element]
+            assert finval > 0, "The final mixing ratio is negative, please choose a smaller (less negative) value of slope"
+            self.abundance_relH.loc[self.rupper[element]:, element] = finval
+        
+        self.abundance_types[element] = 'fractionated'
+        self.normalize_abundances()
+        if return_slope is True:
+            return slope
+
+    def frac_ellipse(self, element, finval, fraction=True):
+
+        if fraction is True:
+            finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
+        if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+
+        __h = self.rlower[element] #(h,k) is the centre of the ellipse
+        __k = finval
+        __a = self.rupper[element] - self.rlower[element]
+        __b = self.abundance_relH.loc[self.fracrange[element][0], element] - __k
+        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = __k + __b * np.sqrt(1 - (self.fracrange[element] - __h)**2 / __a**2)
+        self.abundance_relH.loc[self.rupper[element]:, element] = finval
+        self.abundance_types[element] = 'fractionated'
+        self.normalize_abundances()
+
+    def frac_parabola(self, element, vertex_r, finval, fraction=True):
+
+        if fraction is True:
+            finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
+        if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+
+        __h = vertex_r
+        __a = (self.abundance_relH.loc[self.fracrange[element][0], element] - finval) / ((self.fracrange[element][0] - __h)**2 - (self.fracrange[element][-1] - __h)**2)
+        __k = finval - __a * (self.fracrange[element][-1] - __h)**2
+
+        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = __a * (self.fracrange[element] - __h)**2 + __k
+        assert np.all(self.abundance_relH[element]>0) , "The abundance of " +str(element) + "is negative at some points, please choose a different value for vertex_r and/or finval"
+        self.abundance_relH.loc[self.rupper[element]:, element] = finval
+        self.abundance_types[element] = 'fractionated'
+        self.normalize_abundances()
+
+    def frac_npowerlaws(self, element, break_locations, powerlaws=None, intvals=None, fraction=True, return_powerlaws = False):
+
+        assert powerlaws is None or intvals is None, "Please provide either power law indices or the values at different break locations, not both"
+        if powerlaws is not None:
+            assert (len(powerlaws) - len(break_locations)==1), "Please provide one power law index per interval, i.e. powerlaws should be one longer than break_locations"
+        if intvals is not None:
+            assert (len(intvals) - len(break_locations)==1), "Please provide one intermediate value per interval, i.e. intvals should be one longer than break_locations"
+        if fraction is True:
+            intvals = [val * self.abundance_relH.loc[self.fracrange[element][0], element] for val in intvals]
+            
+        
+        fracrange=[]
+        for i in range(len(break_locations)):
+            if i==0:
+                fracrange.append(self.abundance_relH[self.rlower[element]:break_locations[i]].index.values)
+            else:
+                fracrange.append(self.abundance_relH[break_locations[i-1]:break_locations[i]].index.values)
+        fracrange.append(self.abundance_relH[break_locations[-1]:self.rupper[element]].index.values)
+        if powerlaws is None:
+            powerlaws = []
+            for i in range(len(fracrange)):
+                    if i==0:
+                        powerlaws.append(np.log10(intvals[i] / self.abundance_relH.loc[fracrange[i][0], element]) / np.log10(fracrange[i][-1] / fracrange[i][0]))
+                    else:
+                        powerlaws.append(np.log10(intvals[i] / intvals[i-1]) / np.log10(fracrange[i][-1] / fracrange[i][0]))
+        
+
+        for i in range(len(fracrange)):
+
+            if i==0:
+                self.abundance_relH.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_relH.loc[fracrange[i][0], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i])
+            else:
+                self.abundance_relH.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_relH.loc[fracrange[i-1][-1], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i]) #This leaves 2 identical points at the break points, unsure how to fix
+
+        self.abundance_relH.loc[self.rupper[element]:, element] = self.abundance_relH.loc[fracrange[-1][-1], element]
+        self.abundance_types[element] = 'fractionated'
+        self.normalize_abundances()
+        if return_powerlaws is True:
+            return powerlaws
+
 
 class Abundances:
     '''
@@ -1630,8 +2200,8 @@ class Abundances:
         #Dataframe storing abundance profiles of all 30 elements. Indices are altitudes at which abundances are stored and columns are individual elements.
         self.abundance_profiles = pd.DataFrame(index=np.logspace(0, np.log10(altmax), num=1000), 
                                                 columns=self.elements, dtype=float) 
-
         self.set_solar() # Start with solar constant composition
+        
         
 
     def set_solar(self):
@@ -1643,20 +2213,22 @@ class Abundances:
         self.abundance_types = {}
         self.rlower = dict.fromkeys(self.__solar_abundances_relH.keys(),1.0)
         self.rupper = dict.fromkeys(self.__solar_abundances_relH,1.0) #might make more sense to also set this to altmax or None
-        self.fracrange = dict.fromkeys(self.__solar_abundances_relH,None) 
+        self.fracrange = dict.fromkeys(self.__solar_abundances_relH,None)
+        self.lowercoupled = dict.fromkeys(self.__solar_abundances_relH,None)
+        self.uppercoupled = dict.fromkeys(self.__solar_abundances_relH,None)
         for element in self.elements:
             self.abundance_types[element] = "constant"
 
         # Initially at constant solar composition:
         for element in self.elements:
             self.abundance_profiles[element] = self.__solar_abundances[element]
-
+        
     def normalize_abundances(self):
         '''
         Modifies the abundance_profiles dataframe so that abundances of elements at each altitude add up to 1. 
         Abundances of fractionated elements are left unchanged, while those of constant are scaled while maintaining their number fraction w.r.t hydrogen.
         '''
-
+        #This function does not work properly right now for partially coupled atmospheres 
         #For any element 'e' with a constant profile, e' = e * (1-__fractionated_sum)/__constant_sum where e is abundance at 1 Rp and e' is at any other altitude, and __fractionated_sum is the sum of fractional abundances of fractionated elements at that altitude.
         __columns_exclude = [element for element in self.elements if self.abundance_types[element]=='fractionated']
         __constant_df = self.abundance_profiles.loc[:,~self.abundance_profiles.columns.isin(__columns_exclude)]
@@ -1705,7 +2277,7 @@ class Abundances:
         powerlaw_index_dictionary : dict, optional
             Dictionary of fractionation power-law indices for specific elements. For example, {'C':-4} for the fractional abundance of carbon to follow a power-law profile with -4 (abundance will be 4 orders lower at altmax). By default {}.
         '''
-
+        #Leaving this for now, need to change it if we go with the new normalization type
         assert 'H' not in powerlaw_index_dictionary.keys(), "You cannot fractionate hydrogen, fractionate other elements instead."    
         for element in powerlaw_index_dictionary.keys():
             assert isinstance(powerlaw_index_dictionary[element], (int, float)), "Use single numeric values for the fractionation powerlaw indices."  
@@ -2004,54 +2576,71 @@ class Abundances:
         for i,ele in enumerate(elements):
             ax.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=palette[i],label=ele)
         set_alt_ax(ax=ax, altmax=altmax)
+        ax.set_xscale('linear')
         #xticks = np.linspace(1,altmax,altmax)
         #plt.xticks(xticks)
         #plt.xlim((1,altmax))
         #plt.xlabel('Altitude (Rp)')
         #plt.ylabel('Mixing ratio')
         if log:
+            ax.set_xscale('log')
             ax.set_yscale('log')
         ax.set_ylabel('Mixing Ratio')
         ax.legend()
         plt.show()
+        
 
     #### Fractionation profiles ####
     def set_fracboundary(self, element, rlower, rupper):
 
+        assert element!='H', "Hydrogen cannot be fractionated"
         self.rlower[element] = rlower
         self.rupper[element] = rupper
         self.fracrange[element] = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
+        self.lowercoupled[element] = self.abundance_profiles[:self.rlower[element]].index.values #I have these 2 for consistency with class Fractionation, but don't use them anywhere for building profiles
+        self.uppercoupled[element] = self.abundance_profiles[self.rupper[element]:].index.values
 
-    def frac_powerlaw(self, element, powerlaw_index=None, finval=None, fraction=True):
+    def frac_powerlaw(self, element, powerlaw_index=None, finval=None, fraction=True, return_powerlawindex = False):
 
-        #Need to implement with final value as an option as well
         assert powerlaw_index is None or finval is None, "Please provide either the final mixing ratio or the power-law index, not both"
         if finval is not None:
             if fraction is True:
                 finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element]
-            powerlaw_index = np.log10(finval / self.abundance_profiles.loc[self.fracrange[element][0], element]) / np.log10(self.fracrange[element][-1])
+            if finval > self.abundance_profiles.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+            powerlaw_index = np.log10(finval / self.abundance_profiles.loc[self.fracrange[element][0], element]) / np.log10(self.fracrange[element][-1] / self.fracrange[element][0])
 
         self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] * ((self.fracrange[element] / self.fracrange[element][0])**powerlaw_index)
         self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles.loc[self.fracrange[element][-1], element]
         self.abundance_types[element] = 'fractionated'
 
-    def frac_expdecay(self, element, const=None, finval=None, fraction=True):
+        if return_powerlawindex is True:
+            return powerlaw_index
+
+    def frac_expdecay(self, element, const=None, finval=None, fraction=True, return_const=False):
 
         assert const is None or finval is None, "Please provide either the final mixing ratio or the decay constant, not both"
         if finval is not None:
             if fraction is True:
                 finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element]
-            const = np.log(finval / self.abundance_profiles.loc[self.fracrange[element][0], element]) / self.fracrange[element][-1]
+            if finval > self.abundance_profiles.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+            const = np.log(finval / self.abundance_profiles.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
         
         self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] * np.exp(const * (self.fracrange[element] - self.fracrange[element][0]))
         self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles.loc[self.fracrange[element][-1], element]
         self.abundance_types[element] = 'fractionated'
 
-    def frac_strline(self, element, finval=None, slope=None, fraction=True):
+        if return_const is True:
+            return const
+
+    def frac_strline(self, element, finval=None, slope=None, fraction=True, return_slope=False):
 
         assert finval is None or slope is None, "Please provide either the final mixing ratio or the slope of the line, not both"
         if finval is not None and fraction is True:
             finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element]
+        if finval > self.abundance_profiles.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
         if finval is not None:
             slope = (finval - self.abundance_profiles.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
             self.abundance_profiles.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_profiles.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
@@ -2064,12 +2653,16 @@ class Abundances:
             self.abundance_profiles.loc[self.rupper[element]:, element] = finval
         
         self.abundance_types[element] = 'fractionated'
+        if return_slope is True:
+            return slope
 
     def frac_ellipse(self, element, finval, fraction=True):
 
         if fraction is True:
             finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element] 
-        
+        if finval > self.abundance_profiles.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+
         __h = self.rlower[element] #(h,k) is the centre of the ellipse
         __k = finval
         __a = self.rupper[element] - self.rlower[element]
@@ -2082,7 +2675,9 @@ class Abundances:
 
         if fraction is True:
             finval = finval * self.abundance_profiles.loc[self.fracrange[element][0], element] 
-        
+        if finval > self.abundance_profiles.loc[self.fracrange[element][0], element]:
+                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+
         __h = vertex_r
         __a = (self.abundance_profiles.loc[self.fracrange[element][0], element] - finval) / ((self.fracrange[element][0] - __h)**2 - (self.fracrange[element][-1] - __h)**2)
         __k = finval - __a * (self.fracrange[element][-1] - __h)**2
@@ -2092,9 +2687,18 @@ class Abundances:
         self.abundance_profiles.loc[self.rupper[element]:, element] = finval
         self.abundance_types[element] = 'fractionated'
 
-    def frac_npowerlaws(self, element, break_locations, powerlaws):
+    def frac_npowerlaws(self, element, break_locations, powerlaws=None, intvals=None, fraction=True, return_powerlaws = False):
 
-        #Make sure powerlaws is one longer than break_locations
+        #Make sure powerlaws/intvals is one longer than break_locations
+        assert powerlaws is None or intvals is None, "Please provide either power law indices or the values at different break locations, not both"
+        if powerlaws is not None:
+            assert (len(powerlaws) - len(break_locations)==1), "Please provide one power law index per interval, i.e. powerlaws should be one longer than break_locations"
+        if intvals is not None:
+            assert (len(intvals) - len(break_locations)==1), "Please provide one intermediate value per interval, i.e. intvals should be one longer than break_locations"
+        if fraction is True:
+            intvals = [val * self.abundance_profiles.loc[self.fracrange[element][0], element] for val in intvals]
+            
+        
         fracrange=[]
         for i in range(len(break_locations)):
             if i==0:
@@ -2102,16 +2706,27 @@ class Abundances:
             else:
                 fracrange.append(self.abundance_profiles[break_locations[i-1]:break_locations[i]].index.values)
         fracrange.append(self.abundance_profiles[break_locations[-1]:self.rupper[element]].index.values)
+        if powerlaws is None:
+            powerlaws = []
+            for i in range(len(fracrange)):
+                    if i==0:
+                        powerlaws.append(np.log10(intvals[i] / self.abundance_profiles.loc[fracrange[i][0], element]) / np.log10(fracrange[i][-1] / fracrange[i][0]))
+                    else:
+                        powerlaws.append(np.log10(intvals[i] / intvals[i-1]) / np.log10(fracrange[i][-1] / fracrange[i][0]))
+        
 
         for i in range(len(fracrange)):
 
             if i==0:
                 self.abundance_profiles.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_profiles.loc[fracrange[i][0], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i])
             else:
-                self.abundance_profiles.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_profiles.loc[fracrange[i-1][-1], element] * ((fracrange[i] / fracrange[i-1][-1])**powerlaws[i])
+                self.abundance_profiles.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_profiles.loc[fracrange[i-1][-1], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i]) #This leaves 2 identical points at the break points, unsure how to fix
 
         self.abundance_profiles.loc[self.rupper[element]:, element] = self.abundance_profiles.loc[fracrange[-1][-1], element]
         self.abundance_types[element] = 'fractionated'
+
+        if return_powerlaws is True:
+            return powerlaws
 
 
 
@@ -2747,7 +3362,7 @@ class Sim:
 
         #set abundances as attribute
         if hasattr(self, 'altmax') and hasattr(self, 'p'):
-            self.abundances = Abundances(altmax=self.altmax)
+            self.abundances = Abundances2(altmax=self.altmax)
             self.abundances.parse_abundances_Cloudy(__abundances_text, self.altmax, self.p.R) 
         else:
             pass # Decide what to do here - should only happen when not using sunbather-generated Cloudy simulations
