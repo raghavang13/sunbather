@@ -1647,6 +1647,7 @@ class Abundances:
         self.rlower = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values[0])
         self.rupper = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values[-1]) 
         self.fracrange = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values)
+        self.fractionation_info = dict.fromkeys(self.__solar_abundances_relH.keys(),[])
         
         for element in self.elements:
             self.abundance_types[element] = "constant"
@@ -2027,170 +2028,229 @@ class Abundances:
 
     def __clean_elementarg(self, elementinput):
 
-        if type(element)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
-            element = element.replace(' ','')
-            element = element.split(',') 
-        assert type(element) == list, "Provide a string or list for 'element'"
+        if type(elementinput)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+            elementinput = elementinput.replace(' ','')
+            elementinput = elementinput.split(',') 
+        assert type(elementinput) == list, "Provide a string or list for 'element'"
         
-        return element
+        return elementinput
 
     #### Fractionation profiles ####
-    def set_fracboundary(self, element, rlower, rupper):
+    def set_fracboundary(self, rlower, rupper, elements='all', exclude_elements=['H']):
 
-        assert element!='H', "Hydrogen cannot be fractionated"
-        self.rlower[element] = rlower
-        self.rupper[element] = rupper
-        self.fracrange[element] = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
+        #Cleaning input arguments
+        elements = self.__clean_elementarg(elementinput=elements)
+        exclude_elements = self.__clean_elementarg(elementinput=exclude_elements)
+        if elements == ['all']:
+            elements = self.elements.copy()
+            for element in exclude_elements:
+                elements.remove(element)
+        self.__check_fracargs(elementinput=elements)
+        if type(rlower) != list:
+            rlower = [rlower]
+        if type(rupper) != list:
+            rupper = [rupper]
+        assert len(rlower) == len(rupper), "Please provide the same number of values for rlower and rupper"
+        for i in range(len(rlower)):
+            assert rupper[i] > rlower[i] , "One or more rupper values are less than rlower values. Please check"
+        if len(rlower) == 1:
+            for element in elements:
+                self.rlower[element] = rlower[0]
+                self.rupper[element] = rupper[0]
+        else:
+            for i in range(len(rlower)):
+                self.rlower[elements[i]] = rlower[i]
+                self.rupper[elements[i]] = rupper[i]
+        for element in elements:
+            self.fracrange[element] = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
     
+    def set_fractionationprofile(self, elements='all', exclude_elements=['H'], proftype='powerlaw', frac_intervals=None, gradient = None, vals = None, fraction = True, return_gradient = False, parabola_vertices=None):
 
-    def frac_powerlaw(self, element, powerlaw_index=None, finval=None, fraction=True, return_powerlawindex = False):
+        gradients_returned = {}
+        assert gradient is None or vals is None, "Please provide either the fractionated mixing ratios or gradients, not both"
+        elements = self.__clean_elementarg(elementinput=elements)
+        exclude_elements = self.__clean_elementarg(elementinput=exclude_elements)
+        if frac_intervals is None:
+            rlower = self.abundance_profiles.index.values[0]
+            rupper = self.abundance_profiles.index.values[-1]
+            frac_intervals = [rlower, rupper]
+        else:
+            if len(elements)==1:
+                rlower = frac_intervals[0]
+                rupper = frac_intervals[-1]
+            else:
+                rlower = [interval[0] for interval in frac_intervals] #Will give error if no list inside the frac_intervals list
+                rupper = [interval[-1] for interval in frac_intervals]
+        self.set_fracboundary(rlower=rlower, rupper=rupper, elements=elements, exclude_elements=exclude_elements)
 
-        self.__check_fracargs(elementinput=element)            
+        if elements ==['all']:
+            elements = self.elements.copy()
+            for element in exclude_elements:
+                elements.remove(element)
+            self.__check_fracargs(elementinput=elements)
+
+            if type(proftype)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+                proftype = proftype.replace(' ','')
+                proftype = proftype.split(',') 
+            assert type(proftype) == list, "Provide a string or list for 'proftype'"
+
+            if gradient is not None:
+                assert (len(frac_intervals)- len(gradient))==1, "Please provide one gradient (eg: power-law index) per fractionation interval, so length of frac_intervals should be one more than gradient"
+            elif vals is not None:
+                assert (len(frac_intervals)- len(vals))==1, "Please provide one intermediate value (eg: power-law index) per fractionation interval, so length of frac_intervals should be one more than vals"
+            
+            assert len(proftype) < len(frac_intervals), "Please provide fewer profile types- either one or one less than the length of frac_intervals"
+            if len(proftype) == 1:
+                proftype = proftype * (len(frac_intervals) - 1) #To make N power-laws for example
+
+            for element in elements:
+
+                grad = []
+                for i in range(len(proftype)):
+                    
+                    fracinfo_i = []
+                    rlower_i = frac_intervals[i]
+                    rupper_i = frac_intervals[i+1]
+                    val_i = None
+                    gradient_i = None
+                    vertexr_i = None
+                    if vals is not None:
+                        val_i = vals[i]
+                    if gradient is not None:
+                        gradient_i = gradient[i]
+                    if parabola_vertices is not None:
+                        vertexr_i = parabola_vertices[i] #Be careful while using this
+
+                    if proftype[i] in ['powerlaw', 'plaw','pl']:
+                        gradient_i = self.frac_powerlaw(element=element, rlower=rlower_i, rupper=rupper_i, powerlaw_index=gradient_i, finval=val_i, fraction=fraction, return_powerlawindex=return_gradient)
+
+                    elif proftype[i] in ['expdecay','exp', 'exponential decay', 'exponential', 'exponential_decay']:
+                        gradient_i = self.frac_expdecay(element=element, rlower=rlower_i, rupper=rupper_i, const=gradient_i, finval=val_i, fraction=fraction, return_const=return_gradient)
+
+                    elif proftype[i] in ['strline', 'straightline', 'straight_line', 'line', 'straight line']:
+                        gradient_i = self.frac_strline(element=element, rlower=rlower_i, rupper=rupper_i, slope=gradient_i, finval=val_i, fraction=fraction, return_slope=return_gradient)
+
+                    elif proftype[i] in ['ellipse', 'el', 'arc']:
+                        gradient_i = self.frac_ellipse(element=element, rlower=rlower_i, rupper=rupper_i, finval=val_i, fraction=fraction)
+                    
+                    elif proftype[i] in ['parabola', 'quad', 'quadratic', 'pb']:
+                        gradient_i = self.frac_parabola(element=element, rlower=rlower_i, rupper=rupper_i, vertex_r=vertexr_i, finval=val_i, fraction=fraction)
+                    
+                    grad.append(gradient_i)
+                    fracinfo_i = [rlower_i, rupper_i, proftype[i], val_i, gradient_i, vertexr_i]
+                    
+                    self.fractionation_info[element] = self.fractionation_info[element] + [fracinfo_i]
+                        
+                self.abundance_relH.loc[frac_intervals[-1]:, element] = self.abundance_relH.loc[self.fracrange[element][-1], element]
+                self.abundance_types[element] = 'fractionated'
+                gradients_returned[element] = grad
+                self.normalize_abundances()    
+
+
+        if return_gradient is True:
+
+            return gradients_returned
+
+    def frac_powerlaw(self, element, rlower, rupper, powerlaw_index=None, finval=None, fraction=True, return_powerlawindex = False):
+
         assert powerlaw_index is None or finval is None, "Please provide either the final mixing ratio or the power-law index, not both"
+
+        base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1) #Get value right before the start of this fractionation
+        fracrange = self.abundance_relH.loc[rlower:rupper, element].index.values
         if finval is not None:
             if fraction is True:
                 finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
-            if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
-                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
-            powerlaw_index = np.log10(finval / self.abundance_relH.loc[self.fracrange[element][0], element]) / np.log10(self.fracrange[element][-1] / self.fracrange[element][0])
-
-        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] * ((self.fracrange[element] / self.fracrange[element][0])**powerlaw_index)
-        self.abundance_relH.loc[self.rupper[element]:, element] = self.abundance_relH.loc[self.fracrange[element][-1], element]
-        self.abundance_types[element] = 'fractionated'
-        self.normalize_abundances()
+            if finval > self.abundance_profiles.loc[self.fracrange[element][0], element]:
+                warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+            
+            powerlaw_index = np.log10(finval / base_val[element].values[0]) / np.log10(fracrange[-1] / fracrange[0])
+            
+        self.abundance_relH.loc[rlower:rupper, element] = base_val[element].values[0] * (fracrange / fracrange[0])**powerlaw_index
 
         if return_powerlawindex is True:
             return powerlaw_index
 
-    def frac_expdecay(self, element, const=None, finval=None, fraction=True, return_const=False):
+    def frac_expdecay(self, element, rlower, rupper, const=None, finval=None, fraction=True, return_const=False):
 
-        self.__check_fracargs(elementinput=element)
         assert const is None or finval is None, "Please provide either the final mixing ratio or the decay constant, not both"
+
+        base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1) 
+        fracrange = self.abundance_relH.loc[rlower:rupper, element].index.values
         if finval is not None:
             if fraction is True:
                 finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
             if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
-                warnings.warn("The abundance of " +str(element) + " in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
-            const = np.log(finval / self.abundance_relH.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
+                warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower decay constant / finval for a fractionated atmosphere")
+            const = np.log(finval / base_val[element].values[0]) / (fracrange[-1] - fracrange[0])
     
-        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] * np.exp(const * (self.fracrange[element] - self.fracrange[element][0]))
-        self.abundance_relH.loc[self.rupper[element]:, element] = self.abundance_relH.loc[self.fracrange[element][-1], element]
-        self.abundance_types[element] = 'fractionated'
-        self.normalize_abundances()
-
+        self.abundance_relH.loc[rlower:rupper, element] = base_val[element].values[0] * np.exp(const * (fracrange - fracrange[0]))
+        
         if return_const is True:
             return const
 
-    def frac_strline(self, element, finval=None, slope=None, fraction=True, return_slope=False):
+    def frac_strline(self, element, rlower, rupper, finval=None, slope=None, fraction=True, return_slope=False):
 
-        self.__check_fracargs(elementinput=element)
         assert finval is None or slope is None, "Please provide either the final mixing ratio or the slope of the line, not both"
-        if finval is not None and fraction is True:
-            finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
-        if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
-                warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
-        if finval is not None:
-            slope = (finval - self.abundance_relH.loc[self.fracrange[element][0], element]) / (self.fracrange[element][-1] - self.fracrange[element][0])
-            self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
-            self.abundance_relH.loc[self.rupper[element]:, element] = finval
 
-        else:
-            self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = self.abundance_relH.loc[self.fracrange[element][0], element] + slope * (self.fracrange[element] - self.fracrange[element][0])
-            finval = self.abundance_relH.loc[self.fracrange[element][-1], element]
-            assert finval > 0, "The final mixing ratio is negative, please choose a smaller (less negative) value of slope"
-            self.abundance_relH.loc[self.rupper[element]:, element] = finval
+        base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1)
+        fracrange = self.abundance_relH.loc[rlower:rupper, element].index.values
+
+        if finval is not None:
+            if fraction is True:
+                finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
+            if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
+                warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower slope/ finval for a fractionated atmosphere")
         
-        self.abundance_types[element] = 'fractionated'
-        self.normalize_abundances()
+            slope = (finval - base_val[element].values[0]) / (fracrange[-1] - fracrange[0])
+        
+        self.abundance_relH.loc[rlower:rupper, element] = base_val[element].values[0] + slope * (fracrange - fracrange[0])
+
         if return_slope is True:
             return slope
 
-    def frac_ellipse(self, element, finval, fraction=True):
+    def frac_ellipse(self, element, rlower, rupper, finval, fraction=True):
 
-        self.__check_fracargs(elementinput=element)
+        base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1)
+        fracrange = self.abundance_relH.loc[rlower:rupper, element].index.values
+
         if fraction is True:
             finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
         if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
-                warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
+                warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower finval for a fractionated atmosphere")
 
-        __h = self.rlower[element] #(h,k) is the centre of the ellipse
+        __h = rlower #(h,k) is the centre of the ellipse
         __k = finval
-        __a = self.rupper[element] - self.rlower[element]
-        __b = self.abundance_relH.loc[self.fracrange[element][0], element] - __k
-        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = __k + __b * np.sqrt(1 - (self.fracrange[element] - __h)**2 / __a**2)
-        self.abundance_relH.loc[self.rupper[element]:, element] = finval
-        self.abundance_types[element] = 'fractionated'
-        self.normalize_abundances()
+        __a = rupper - rlower
+        __b = base_val[element].values[0] - __k
+        self.abundance_relH.loc[rlower:rupper, element] = __k + __b * np.sqrt(1 - (fracrange - __h)**2 / __a**2)
+        
+    def frac_parabola(self, element, rlower, rupper, vertex_r, finval, fraction=True):
 
-    def frac_parabola(self, element, vertex_r, finval, fraction=True):
+        assert vertex_r > rlower and vertex_r < rupper, f"The parabola vertex should be located between {rlower} and {rupper}"
+        base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1)
+        fracrange = self.abundance_relH.loc[rlower:rupper, element].index.values
 
-        self.__check_fracargs(elementinput=element)
         if fraction is True:
             finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
         if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
                 warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower powerlaw index/ finval for a fractionated atmosphere")
 
         __h = vertex_r
-        __a = (self.abundance_relH.loc[self.fracrange[element][0], element] - finval) / ((self.fracrange[element][0] - __h)**2 - (self.fracrange[element][-1] - __h)**2)
-        __k = finval - __a * (self.fracrange[element][-1] - __h)**2
+        __a = (base_val[element].values[0] - finval) / ((fracrange[0] - __h)**2 - (fracrange[-1] - __h)**2)
+        __k = finval - __a * (fracrange[-1] - __h)**2
 
-        self.abundance_relH.loc[self.rlower[element]:self.rupper[element], element] = __a * (self.fracrange[element] - __h)**2 + __k
-        assert np.all(self.abundance_relH[element]>0) , "The abundance of " +str(element) + "is negative at some points, please choose a different value for vertex_r and/or finval"
-        self.abundance_relH.loc[self.rupper[element]:, element] = finval
-        self.abundance_types[element] = 'fractionated'
-        self.normalize_abundances()
-
-    def frac_npowerlaws(self, element, break_locations, powerlaws=None, intvals=None, fraction=True, return_powerlaws = False):
-
-        self.__check_fracargs(elementinput=element)
-        assert powerlaws is None or intvals is None, "Please provide either power law indices or the values at different break locations, not both"
-        if powerlaws is not None:
-            assert (len(powerlaws) - len(break_locations)==1), "Please provide one power law index per interval, i.e. powerlaws should be one longer than break_locations"
-        if intvals is not None:
-            assert (len(intvals) - len(break_locations)==1), "Please provide one intermediate value per interval, i.e. intvals should be one longer than break_locations"
-        if fraction is True:
-            intvals = [val * self.abundance_relH.loc[self.fracrange[element][0], element] for val in intvals]
-            
+        self.abundance_relH.loc[rlower:rupper, element] = __a * (fracrange - __h)**2 + __k
+        assert np.all(self.abundance_relH[element]>0) , f"The abundance of {element} is negative at some points, please choose a different value for vertex_r and/or finval"
         
-        fracrange=[]
-        for i in range(len(break_locations)):
-            if i==0:
-                fracrange.append(self.abundance_relH[self.rlower[element]:break_locations[i]].index.values)
-            else:
-                fracrange.append(self.abundance_relH[break_locations[i-1]:break_locations[i]].index.values)
-        fracrange.append(self.abundance_relH[break_locations[-1]:self.rupper[element]].index.values)
-        if powerlaws is None:
-            powerlaws = []
-            for i in range(len(fracrange)):
-                    if i==0:
-                        powerlaws.append(np.log10(intvals[i] / self.abundance_relH.loc[fracrange[i][0], element]) / np.log10(fracrange[i][-1] / fracrange[i][0]))
-                    else:
-                        powerlaws.append(np.log10(intvals[i] / intvals[i-1]) / np.log10(fracrange[i][-1] / fracrange[i][0]))
-        
-
-        for i in range(len(fracrange)):
-
-            if i==0:
-                self.abundance_relH.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_relH.loc[fracrange[i][0], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i])
-            else:
-                self.abundance_relH.loc[fracrange[i][0]:fracrange[i][-1], element] = self.abundance_relH.loc[fracrange[i-1][-1], element] * ((fracrange[i] / fracrange[i][0])**powerlaws[i]) #This leaves 2 identical points at the break points, unsure how to fix
-
-        self.abundance_relH.loc[self.rupper[element]:, element] = self.abundance_relH.loc[fracrange[-1][-1], element]
-        self.abundance_types[element] = 'fractionated'
-        self.normalize_abundances()
-        if return_powerlaws is True:
-            return powerlaws
-    
     
     def __check_fracargs(self, elementinput):
 
-        assert elementinput!='H', "You cannot fractionate hydrogen, fractionate other elements instead."
-        if self.abundance_types[elementinput] == "fractionated":
-            warnings.warn(f"You're trying to set a fractionation profile for {elementinput}, but this element already " \
+        for element in elementinput:
+            assert element!='H', "You cannot fractionate hydrogen, fractionate other elements instead."
+            if self.abundance_types[element] == "fractionated":
+                warnings.warn(f"You're trying to set a fractionation profile for {element}, but this element already " \
                             "has a fractionated profile. The fractionation will be applied on top of the existing profile. ")
         
-        
-
 
 
 class Fractionation:
@@ -2287,7 +2347,7 @@ class Fractionation:
             elements = elements.split(',')  
         assert type(elements) == list, "Provide a string or list for 'elements'"
         if elements == ['all']:
-            elements = self.elements
+            elements = self.elements.copy()
         if 'H' in elements:
             elements.remove('H')
             
