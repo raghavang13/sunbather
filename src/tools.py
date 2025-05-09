@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 from scipy.integrate import solve_ivp
 from scipy.signal import savgol_filter
 import scipy.stats as sps
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d 
 from fractions import Fraction
 import warnings
 
@@ -1449,7 +1449,7 @@ def write_Cloudy_in(simname, title=None, flux_scaling=None,
                         f.write("\nelement "+element_names[element]+" abundance "+'{:.2f}'.format(alaw[element]))
                             
                 elif (isinstance(alaw[element], np.ndarray)):
-                    alaw[element] = remove_duplicates(alaw[element], "1.7f")
+                    #alaw[element] = remove_duplicates(alaw[element], "1.7f")  #Can be added back if Cloudy is fixed to use uneven size element tables for multiple elements
                     f.write("\n# ======= " + element_names[element] + " fractionation law ====")
                     f.write("\nelement " + element_names[element] + " table depth\n" )
                     np.savetxt(f,alaw[element],fmt='%1.7f')
@@ -1648,10 +1648,10 @@ class Abundances:
 
         # Set all abundances types to constant w.r.t. hydrogen
         self.abundance_types = {}
-        self.rlower = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values[0])
-        self.rupper = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values[-1]) 
-        self.fracrange = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values)
-        self.fractionation_info = dict.fromkeys(self.__solar_abundances_relH.keys(),[])
+        self.rlower = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values[0]) #Dictionary with (lower) radius upto which an element is coupled with hydrogen
+        self.rupper = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values[-1]) #Dictionary with (upper) radius beyond which an element is coupled with hydrogen
+        self.fracrange = dict.fromkeys(self.__solar_abundances_relH.keys(),self.abundance_profiles.index.values) #Altitude range where element is decoupled from hydrogen
+        self.fractionation_info = dict.fromkeys(self.__solar_abundances_relH.keys(),[]) #Dictionary that stores information of fractionation applied to an element using set_fractionationprofile
         
         for element in self.elements:
             self.abundance_types[element] = "constant"
@@ -1968,18 +1968,46 @@ class Abundances:
     #### Miscellaneous functions ####
     def get_scalesame_dictionary(self, scalevalue, exclude_elements=['H']):
         '''
-        Can be used to create a dictionary that prescribes same fractionation power-law index or initial scale factor for multiple elements.
+        Used to create a dictionary that prescribes same the initial scale factor for multiple elements.
+
+        Parameters
+        ----------
+        scalevalue : float
+            Value by which elements are to be scaled
+        exclude_elements : list / str, optional
+            Elements whose abundances relative to solar are not to be scaled. Should include hydrogen as hydrogen cannot be scaled. By default ['H'], so only hydrogen is excluded.
+
+        Returns
+        -------
+        scalesame_dict: dict
+            Dictionary containing elements and scale values, can be passed as scale_factor_dictionary argument of set_metallicity()
         '''
         exclude_elements = self.clean_elementarg(elementinput=exclude_elements)
         if 'H' not in exclude_elements:
-            warnings.warn("You cannot scale or fractionate hydrogen, so be wary of using the dictionary returned by this function. Make sure exclude_elements includes 'H' to avoid running into errors if using this dictionary to scale elements or set fractionation profiles.")
+            warnings.warn("You cannot scale or fractionate hydrogen, so be wary of using the dictionary returned by this function. Make sure exclude_elements includes 'H' to avoid running into errors if using this dictionary to scale elements.")
         scalesame_dict_elements = [ele for ele in self.elements if ele not in exclude_elements]
         scalesame_dict = dict(zip(scalesame_dict_elements,scalevalue*np.ones(len(scalesame_dict_elements))))
         return scalesame_dict
     
-    def plot_abundanceprofiles(self, altmax=20, elements='all', log=False, relH=False):
+    def plot_abundanceprofiles(self, ax, altmax=20, elements='all', log=False, relH=False, linestyle='solid'):
         '''
         Used to plot abundance profiles of one or more elements
+
+        Parameters
+        ----------
+        ax : matplotlib.Axes
+            Figure axis to configure.
+        altmax : numeric
+            Maximum altitude of the atmosphere in units of planetary radius upto where abundance profiles are to be plotted.
+        elements: list / str, optional
+            Elements whose abundance profiles are to be plotted. By default 'all'.
+        log : bool, optional
+            Plots in log-log scale if true. By default False, in which case it plots in linear scale.
+        relH : bool, optional
+            If true, elemental abundances relative to hydrogen (stored in the abundance_relH dataframe) are plotted.
+            By default false, in which case true elemental abundances (stored in abundance_profiles) are plotted.
+        linestyle: str, optional
+            Plot linestyle, useful to visualize different abundance profiles of same element (to do this multiple Abundances objects are required). By default 'solid'.
         '''
         elements = self.clean_elementarg(elementinput=elements)
         if elements == ['all']:
@@ -1991,12 +2019,12 @@ class Abundances:
                'Ca':'goldenrod', 'Sc':'gold', 'Ti':'olivedrab', 'V':'olive', 'Cr':'purple',
                'Mn':'limegreen', 'Fe':'darkslategray', 'Co':'mediumaquamarine', 'Ni':'cyan',
                'Cu':'darkturquoise', 'Zn':'teal'}
-        fig, ax = plt.subplots(1) 
+        
         for i,ele in enumerate(elements):
             if relH is False:
-                ax.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=colordict[ele],label=ele)
+                ax.plot(self.abundance_profiles.index.values,self.abundance_profiles[ele],color=colordict[ele],label=ele,linestyle=linestyle)
             else:
-                ax.plot(self.abundance_relH.index.values,self.abundance_relH[ele],color=colordict[ele],label=ele)
+                ax.plot(self.abundance_relH.index.values,self.abundance_relH[ele],color=colordict[ele],label=ele,linestyle=linestyle)
         set_alt_ax(ax=ax, altmax=altmax)
         ax.set_yscale('log')
         if log is False: 
@@ -2007,22 +2035,32 @@ class Abundances:
         else:
             ax.set_ylabel('Mixing Ratio (relative to hydrogen)')
         ax.legend()
-        plt.show()
     
-    def optimize_alaw(self, element, altmax, Rp, Npoints=100, fmt="1.7f", plot=True):
+    def optimize_alaw(self, element, altmax, Rp, Npoints=100, plot=True):
         '''
         Used to visualize the accuracy of writing an abundance profile to Cloudy for different number of points, maximum altitude, planetary radius and precision of removing duplicate points in the element table.
 
         Parameters
         ----------
         element : str
+            Element whose abundance profile is to be optimized.
+        altmax : numeric
+            Maximum altitude of the atmosphere in units of planetary radius.
+        Rp : float
+            Planetary radius in cm.
+        Npoints : int, optional
+            Number of points in table that would be given to Cloudy input file. By default 100.
+        plot: bool, optional
+            If true, plots input abundance profile alongside the profile that would be given to Cloudy. By default True.
 
-
+        Returns
+        -------
+        read_obj : tools.Abundances()
+            An object with the abundance profile that would be written to Cloudy for the given input parameters
         '''
         assert self.abundance_types[element] =='fractionated' , str(element) + " is not fractionated"
         assert Npoints<500, "Cloudy allows only upto 500 pairs for an element's position dependent abundance table"
         alaw = self.get_alaw_Cloudy(altmax=altmax, Rp=Rp, Npoints=Npoints)
-        alaw[element] = remove_duplicates(alaw[element], fmt=fmt)
         
         log_depths = alaw[element][:,0]
         log_abundance = alaw[element][:,1]
@@ -2047,6 +2085,19 @@ class Abundances:
 
     def clean_elementarg(self, elementinput):
 
+        '''
+        Generally called by another function to convert user input for its 'elements' argument into a list.
+
+        Parameters
+        ----------
+        elementinput: str or list
+           Element argument given to another function
+
+        Returns
+        -------
+        elementinput: list
+            Cleaned input argument with each elements as list items 
+        '''
         if type(elementinput)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
             elementinput = elementinput.replace(' ','')
             elementinput = elementinput.split(',') 
@@ -2057,6 +2108,18 @@ class Abundances:
     #### Fractionation profiles ####
     def set_fracboundary(self, rlower, rupper, elements):
 
+        '''
+        Updates the fractionation boundaries of elements. Does not need to be called separately, is automatically used by set_fractionationprofile()
+
+        Parameters
+        ----------
+        rlower : float / list
+            Radii upto which elements are coupled with hydrogen, beyond which they are decoupled (fractionated) till rupper.
+        rupper : float / list
+            Radii beyond which elements are coupled with hydrogen again.
+        elements : list / str
+            Elements whose fractionation boundaries are to be updated.
+        '''
         #Cleaning input arguments
         if type(rlower) != list:
             rlower = [rlower]
@@ -2079,6 +2142,31 @@ class Abundances:
     
     def set_fractionationprofile(self, elements='all', exclude_elements=['H'], proftype='powerlaw', frac_intervals=None, gradient = None, vals = None, fraction = True, parabola_vertices=None):
 
+        '''
+        Main function to set the fractionated abundance profiles of one or more elements. More detailed documentation of the different input methods elsewhere.
+
+        Parameters
+        ----------
+        elements : list / str, optional
+            Elements to be fractionated. By default 'all', in which case all elements other than elements in exclude_elements are fractionated.
+        exclude_elements : list, optional
+            Used to not fractionate particular elements when elements is 'all'. By default ['H'], in which case all elements other than hydrogen are fractionated with the same profile.
+        proftype : list / str, optional
+            Shape of a fractionation profile, can be one among powerlaw, straight line, exponential decay, ellipse or parabola. By default powerlaw.
+        frac_intervals : list, optional
+            List of radii where different fractionation profiles are to be applied. By default None, in which case the complete (1-altmax) is fractionated for the selected elements.
+        gradient : list / float, optional
+            Serves as a power-law index, slope or decay constant for power law, straight line or exponential decay profiles. By default None, in which case vals is used to calculate this value if one of these profiles are given.
+        vals : list / float, optional
+            Final value of element's abundance relative to hydrogen at the end of a fractionation interval. By default None, in which case gradient is used if a relevant profile type is given (else flagged as an error).
+        fraction: bool, optional
+            If true, final value of abundance relative to hydrogen at the end of a fractionation interval is calculated as a fraction of the initial value. 
+            If false, the values in 'vals' are used as the absolute final values for elemental abundances relative to hydrogen. 
+            By default True.
+        parabola_vertices: list / float, optional
+            Contains the radii where the parabola fractionation profiles, if applicable, reach their minimum/ maximum value. Input list should have None values at appropriate points if multiple intervals are present and some are non-parabola.
+            By default None.
+        '''
         assert gradient is None or vals is None, "Please provide either the fractionated mixing ratios or gradients, not both"
         elements = self.clean_elementarg(elementinput=elements)
         exclude_elements = self.clean_elementarg(elementinput=exclude_elements) #Only used if elements is 'all'
@@ -2087,19 +2175,19 @@ class Abundances:
             rupper = self.abundance_profiles.index.values[-1]
             frac_intervals = [rlower, rupper]
         
-        if type(proftype)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
+        if type(proftype)==str: 
             proftype = proftype.replace(' ','')
             proftype = proftype.split(',') 
         assert type(proftype) == list, "Provide a string or list for 'proftype'"
 
-        if elements ==['all']:
+        if elements ==['all']: #This loop is used to set the same fractionation profile (shape) excluding certain elements
             elements = self.elements.copy()
             for element in exclude_elements:
                 elements.remove(element)
 
             rlower = frac_intervals[0]
             rupper = frac_intervals[-1]
-            self.set_fracboundary(rlower=rlower, rupper=rupper, elements=elements)
+            self.set_fracboundary(rlower=rlower, rupper=rupper, elements=elements) #Same fractionation range set for all elements 
             self.check_fracargs(elementinput=elements)
 
             if gradient is not None:
@@ -2345,6 +2433,14 @@ class Abundances:
     
     def check_fracargs(self, elementinput):
 
+        '''
+        Used in set_fractionationprofile(). Checks that hydrogen is not present in the list of elements to be fractionated, and gives a warning if one or more elements in the list are already fractionated.
+
+        Parameters
+        ----------
+        elementinput : list
+            List of elements to be fractionated in set_fractionationprofile() 
+        '''
         for element in elementinput:
             assert element!='H', "You cannot fractionate hydrogen, fractionate other elements instead."
             if self.abundance_types[element] == "fractionated":
@@ -2375,6 +2471,7 @@ class Fractionation:
         self.velratio_estimate = {'H':1}
         self.fluxratio_estimate = {'H':1}
         self.analytic_fracestimate()
+        self.bulk_mixingratio = {}
     
     def __set_abundances(self):
 
@@ -2548,20 +2645,50 @@ class Fractionation:
             self.abundances.abundance_types[element] = 'fractionated'
             self.abundances.normalize_abundances()
             
-    def create_parameterizedprof(self, elements='all', exclude_elements=['H'], proftype='powerlaw', frac_intervals=None, gradient = None, vals = None, fraction = True, parabola_vertices=None, modify_simdf=False):
+    def create_parameterizedprof(self, elements='all', proftype='powerlaw', frac_intervals=None, gradient = None, vals = None, fraction = True, parabola_vertices=None, modify_simdf=False):
 
         #Add check for any absent elements being included in elements argument (and provision to auto-exclude absent elements)
+        exclude_elements = ['H']
+        if elements=='all':
+            for element in self.elements:
+                if not (np.all(self.abundances.abundance_profiles[element].values)):
+                    exclude_elements.append(element)
         self.abundances.set_fractionationprofile(elements=elements, exclude_elements=exclude_elements, proftype=proftype, frac_intervals=frac_intervals, gradient=gradient, vals = vals, fraction=fraction, parabola_vertices=parabola_vertices)
 
         simdf_copy = self.simdf.copy()
         for element in self.elements:
             if (np.all(self.abundances.abundance_profiles[element].values)):
-                simdf_copy['NumFlux_'+element] = simdf_copy['NumFlux_H'] * self.abundances.abundance_relH[element].values
+                simdf_copy['NumFlux_'+element] = simdf_copy['NumFlux_'+element].values * self.abundances.abundance_relH[element].values / self.abundances.abundance_relH[element].values[0]
         
         if modify_simdf is True:
             self.simdf = simdf_copy
         return simdf_copy
-    
+
+    def calc_bulkmixingratio(self, use_numflux=True):
+
+        if use_numflux is True:
+            flux_sum = 0.
+            for element in self.elements:
+                if not (np.all(self.simdf['NumFlux_'+element].values) is None):
+                    flux_sum = flux_sum + sum(self.simdf['NumFlux_'+element].values)
+            for element in self.elements:
+                if (np.all(self.simdf['NumFlux_'+element].values) is None):
+                    self.bulk_mixingratio[element] = None
+                else:
+                    self.bulk_mixingratio[element] = sum(self.simdf['NumFlux_'+element].values) / flux_sum
+        
+        else:
+            nden_sum = 0.
+            for element in self.elements:
+                if not (np.all(self.simdf['n_'+element].values) is None):
+                    nden_sum = nden_sum + sum(self.simdf['n_'+element].values)
+            for element in self.elements:
+                if (np.all(self.simdf['n_'+element].values) is None):
+                    self.bulk_mixingratio[element] = None
+                else:
+                    self.bulk_mixingratio[element] = sum(self.simdf['n_'+element].values) / nden_sum
+        
+        return self.bulk_mixingratio
 
 class Parker:
     """
