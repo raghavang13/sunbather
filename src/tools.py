@@ -1599,12 +1599,12 @@ def insertden_Cloudy_in(simname, denspecies, selected_den_levels=True, rerun=Fal
 ###########     CLASSES     ###########
 #######################################
 class Abundances:
-    '''
+    """
     Class that stores the abundance profiles of the elements in a planetary atmosphere. Contains methods to modify these profiles.
-    '''
+    """
 
     def __init__(self, altmax=20):
-        '''
+        """
         Sets the initial (solar) abundance profile of the atmosphere upto a particular altitude (altmax)
 
         Parameters
@@ -1612,7 +1612,7 @@ class Abundances:
         altmax : numeric, optional
             Maximum altitude of the abundance profiles in units of planet radius, by default 20. 
             Can be set by the user when running simulations, or read from input files of simulations
-        '''
+        """
 
         # from Hazy Table 7.1:
         self.__solar_abundances_relH = {'H': 1., 'He': 0.1, 'Li': 2.04e-9, 'Be': 2.63e-11, 'B': 6.17e-10,
@@ -1635,16 +1635,16 @@ class Abundances:
         self.set_solar() # Start with solar constant composition
         
     def update_abundance_relH(self):
-        '''
+        """
         Updates the abundance_relH dataframe by dividing true abundance profiles by the abundance of hydrogen at each altitude.
-        '''
+        """
 
         self.abundance_relH = self.abundance_profiles.div(self.abundance_profiles['H'], axis=0)
 
     def set_solar(self):
-        '''
+        """
         Sets abundances of all elements to the solar composition. Any existing abundance profiles are overwritten.
-        '''
+        """
 
         # Set all abundances types to constant w.r.t. hydrogen
         self.abundance_types = {}
@@ -1663,10 +1663,10 @@ class Abundances:
         self.update_abundance_relH()
 
     def set_abundancetypes(self):
-        '''
+        """
         Sets the abundance types of all elements using the abundance_relH dataframe. Used when setting abundances while reading a simulation.
         Can also be employed wwhen copying the abundance profiles from one abundance object to another.
-        '''
+        """
         
         for element in self.elements:
             if (np.all(self.abundance_relH.loc[:,element] == self.abundance_relH[element].iloc[0])):
@@ -1676,15 +1676,15 @@ class Abundances:
                 self.abundance_types[element] = "fractionated"
             
     def normalize_abundances(self):
-        '''
+        """
         Sets the abundance profile of an element (abundance relative to complete atmosphere) from the abundance_relH dataframe. 
-        '''
+        """
 
         self.abundance_profiles = self.abundance_relH.div(self.abundance_relH.sum(axis=1).values, axis=0)
 
     
     def set_metallicity(self, metallicity=1., scale_factor_dictionary={}, setsolar=True):
-        '''
+        """
         Sets the metallicity and individual element scale factors with respect to solar composition.
 
         Parameters
@@ -1696,7 +1696,7 @@ class Abundances:
             Is not independent of metallicity, i.e. metallicity=5., scale_factor_dictionary={'C':2} would make carbon ten times more abundant than solar.
         setsolar: bool, optional
             Whether to revert to solar composition before setting metallicity and/or element scale factors.            
-        '''
+        """
 
         if setsolar:
             self.set_solar() # revert to constant solar
@@ -1715,7 +1715,7 @@ class Abundances:
     
     
     def get_abundance_constant(self, element):
-        '''
+        """
         Returns the fractional abundance of an element. This function can only be used for atmospheres with no fractionation.
 
         Parameters
@@ -1727,7 +1727,7 @@ class Abundances:
         -------
         abundance : float
             Fractional abundance of the element.
-        '''
+        """
 
         assert "fractionated" not in self.abundance_types.values(), "At least one element is fractionated. This "\
             "automatically results in non-constant abundance profiles for every element. Use the get_abundance_profile() method instead."
@@ -1736,7 +1736,7 @@ class Abundances:
         return abundance
 
     def get_abundance_profile(self, element='all', grid=None, altmax=None, Rp=None):
-        '''
+        """
         Returns the abundance profile of one or all elements for the complete atmosphere or a custom altitude grid (generally the depth grid in a Cloudy .ovr file)
         
         Parameters
@@ -1756,7 +1756,7 @@ class Abundances:
         If a grid is provided, 
             abundance_profile_ongrid : pandas.Dataframe 
                 The abundance profiles interpolated onto the given grid.
-        '''
+        """
 
         if grid is None: 
             if element == 'all':
@@ -1781,7 +1781,7 @@ class Abundances:
             return abundance_profile_ongrid
 
     def get_abundance_constant_Cloudy(self, element):
-        '''
+        """
         Returns the fractional abundance of an element with a constant profile. The abundance returned is relative to hydrogen and logarithmic (base 10) as required by Cloudy input files. 
 
         Parameters
@@ -1794,7 +1794,7 @@ class Abundances:
         np.log10(abundance_relH): float
             Base 10 logarithm of fractional abundance of the element relative to hydrogen.
         -np.inf is returned instead for an element that is absent in the atmosphere.
-        '''
+        """
 
         assert self.abundance_types[element] == "constant", "This element does not have a constant abundance but is fractionated."
         if self.abundance_relH[element].iloc[0] == 0.0: #Element not present in the atmosphere
@@ -1805,7 +1805,7 @@ class Abundances:
     
     
     def get_abundance_profile_Cloudy(self, altmax, Rp, element='all', Npoints=50):
-        '''
+        """
         Returns the abundances of one or more fractionated elements (or all fractionated elements if element='all') at different altitudes in a particular planetary atmosphere.
         The abundance profiles are returned relative to hydrogen and logarithmic (base 10) as required by Cloudy input files.
 
@@ -1825,7 +1825,7 @@ class Abundances:
         abundances_relH_reindexed: pandas.Dataframe
             Dataframe with containing the abundance profile of the given element(s) (or all fractionated elements). The indices are log (base 10) of altitudes in the planetary atmosphere at which abundances have been interpolated. 
             The abundances are relative to hydrogen abundances at those altitudes and logarithmic (base 10).
-        '''
+        """
 
         element = self.clean_elementarg(elementinput=element)
         if element==['all']:
@@ -1848,7 +1848,7 @@ class Abundances:
         return abundances_relH_reindexed
     
     def get_element_scalefactor(self,element,abundance_relH=None):
-        '''
+        """
         Compares the abundance of an element to its abundance in the solar composition and returns the factor by which it has been scaled. 
 
         Parameters
@@ -1857,14 +1857,14 @@ class Abundances:
             Element whose scale factor is to be returned
         abundance_relH : float, optional
             log (base 10) of the abundance of the element relative to hydrogen. By default None, in which case get_abundance_constant_Cloudy is used to calculate this value.
-        '''
+        """
 
         if abundance_relH is None:
             abundance_relH = self.get_abundance_constant_Cloudy(element)
         return 10**abundance_relH/self.__solar_abundances_relH[element]
 
     def get_alaw_Cloudy(self, altmax, Rp, Npoints=50):
-        '''
+        """
         Used to write abundance profiles of elements with non-solar composition to Cloudy input files
 
         Parameters
@@ -1880,7 +1880,7 @@ class Abundances:
         -------
         alaw : dict
             Dictionary containing elements that are scaled and/or fractionated w.r.t solar composition and their corresponding abundances- either a constant or a numpy column stack as fit to be given to Cloudy input files.
-        '''
+        """
 
         assert list(Abundances().abundance_profiles.columns.difference(self.abundance_profiles.columns)) == [], "One or more elements in the abundance_profiles dataframe of the abundances object is missing."\
         " If you would like to remove some elements from the atmosphere, use the set_metallicity function in class Abundances."
@@ -1898,7 +1898,7 @@ class Abundances:
         return alaw
 
     def set_abundance_profile_Cloudy(self, element, log_depths, log_abundance, altmax, Rp):
-        '''
+        """
         Used to construct the abundance profile of a fractionated element from the table in a Cloudy input file. After interpolating onto the 1...20 (or self.altmax) grid, the abundances are normalized to sum to 1.
 
         Parameters
@@ -1913,7 +1913,7 @@ class Abundances:
             Maximum altitude of the atmosphere in units of planetary radius.
         Rp : float
             Planetary radius in cm.
-        '''
+        """
 
         log_depths[0] = 0 #In Cloudy input, first point is 10^-35cm
         __corr_Rgrid = altmax*Rp - 10**log_depths
@@ -1925,7 +1925,7 @@ class Abundances:
 
 
     def parse_abundances_Cloudy(self, abundances_text, altmax, Rp):        
-        '''
+        """
         Takes all the lines of a (Cloudy input) file containing information about abundances of elements and reconstructs the composition of the atmosphere.
 
         Parameters
@@ -1936,7 +1936,7 @@ class Abundances:
             Maximum altitude of the atmosphere in units of planetary radius.
         Rp : float
             Planetary radius in cm.
-        '''
+        """
 
         for index in range(len(abundances_text)):
             if 'off' in abundances_text[index]: #element name off implies the element is absent in the atmosphere
@@ -1967,7 +1967,7 @@ class Abundances:
     
     #### Miscellaneous functions ####
     def get_scalesame_dictionary(self, scalevalue, exclude_elements=['H']):
-        '''
+        """
         Used to create a dictionary that prescribes same the initial scale factor for multiple elements.
 
         Parameters
@@ -1981,7 +1981,7 @@ class Abundances:
         -------
         scalesame_dict: dict
             Dictionary containing elements and scale values, can be passed as scale_factor_dictionary argument of set_metallicity()
-        '''
+        """
         exclude_elements = self.clean_elementarg(elementinput=exclude_elements)
         if 'H' not in exclude_elements:
             warnings.warn("You cannot scale or fractionate hydrogen, so be wary of using the dictionary returned by this function. Make sure exclude_elements includes 'H' to avoid running into errors if using this dictionary to scale elements.")
@@ -2037,7 +2037,7 @@ class Abundances:
         ax.legend()
     
     def optimize_alaw(self, element, altmax, Rp, Npoints=100, plot=True):
-        '''
+        """
         Used to visualize the accuracy of writing an abundance profile to Cloudy for different number of points, maximum altitude, planetary radius and precision of removing duplicate points in the element table.
 
         Parameters
@@ -2057,7 +2057,7 @@ class Abundances:
         -------
         read_obj : tools.Abundances()
             An object with the abundance profile that would be written to Cloudy for the given input parameters
-        '''
+        """
         assert self.abundance_types[element] =='fractionated' , str(element) + " is not fractionated"
         assert Npoints<500, "Cloudy allows only upto 500 pairs for an element's position dependent abundance table"
         alaw = self.get_alaw_Cloudy(altmax=altmax, Rp=Rp, Npoints=Npoints)
@@ -2084,8 +2084,7 @@ class Abundances:
         return read_obj
 
     def clean_elementarg(self, elementinput):
-
-        '''
+        """
         Generally called by another function to convert user input for its 'elements' argument into a list.
 
         Parameters
@@ -2097,7 +2096,7 @@ class Abundances:
         -------
         elementinput: list
             Cleaned input argument with each elements as list items 
-        '''
+        """
         if type(elementinput)==str: #In case users give one element or a comma separated string like element='He,Mg, C' or element='He'
             elementinput = elementinput.replace(' ','')
             elementinput = elementinput.split(',') 
@@ -2107,8 +2106,7 @@ class Abundances:
 
     #### Fractionation profiles ####
     def set_fracboundary(self, rlower, rupper, elements):
-
-        '''
+        """
         Updates the fractionation boundaries of elements. Does not need to be called separately, is automatically used by set_fractionationprofile()
 
         Parameters
@@ -2119,7 +2117,7 @@ class Abundances:
             Radii beyond which elements are coupled with hydrogen again.
         elements : list / str
             Elements whose fractionation boundaries are to be updated.
-        '''
+        """
         #Cleaning input arguments
         if type(rlower) != list:
             rlower = [rlower]
@@ -2141,8 +2139,7 @@ class Abundances:
             self.fracrange[element] = self.abundance_profiles[self.rlower[element]:self.rupper[element]].index.values
     
     def set_fractionationprofile(self, elements='all', exclude_elements=['H'], proftype='powerlaw', frac_intervals=None, gradient = None, vals = None, fraction = True, parabola_vertices=None):
-
-        '''
+        """
         Main function to set the fractionated abundance profiles of one or more elements. More detailed documentation of the different input methods elsewhere.
 
         Parameters
@@ -2166,7 +2163,7 @@ class Abundances:
         parabola_vertices: list / float, optional
             Contains the radii where the parabola fractionation profiles, if applicable, reach their minimum/ maximum value. Input list should have None values at appropriate points if multiple intervals are present and some are non-parabola.
             By default None.
-        '''
+        """
         assert gradient is None or vals is None, "Please provide either the fractionated mixing ratios or gradients, not both"
         elements = self.clean_elementarg(elementinput=elements)
         exclude_elements = self.clean_elementarg(elementinput=exclude_elements) #Only used if elements is 'all'
@@ -2190,8 +2187,9 @@ class Abundances:
             self.set_fracboundary(rlower=rlower, rupper=rupper, elements=elements) #Same fractionation range set for all elements 
             self.check_fracargs(elementinput=elements)
 
+            #if only gradient or vals is provided, as a float/int, it is converted to a list so iteration is still possible
             if gradient is not None:
-                if isinstance(gradient, (int,float)):
+                if isinstance(gradient, (int,float)): 
                     gradient = [gradient]
                 assert (len(frac_intervals)- len(gradient))==1, "Please provide one gradient (eg: power-law index) per fractionation interval, so length of frac_intervals should be one more than gradient"
             elif vals is not None:
@@ -2205,7 +2203,7 @@ class Abundances:
 
             for element in elements:
 
-                for i in range(len(proftype)):
+                for i in range(len(proftype)): #We apply the specified profile in each interval iteratively, for each element. In this case, the profile shape is identical for all elements
                     
                     fracinfo_i = []
                     rlower_i = frac_intervals[i]
@@ -2241,7 +2239,7 @@ class Abundances:
                         warnings.warn("No fractionation will be done because no valid profile types have been given")
                     
                     if val_i is None:
-                        val_i = self.abundance_relH.loc[1:rupper_i, element].values[-1] / self.abundance_relH.loc[1:rlower_i, element].values[-1]
+                        val_i = self.abundance_relH.loc[1:rupper_i, element].values[-1] / self.abundance_relH.loc[1:rlower_i, element].values[-1] #Final mixing ratio at each interval, to document in fracinfo
                     fracinfo_i = [rlower_i, rupper_i, proftype[i], val_i, gradient_i, vertexr_i]
                     
                     self.fractionation_info[element] = self.fractionation_info[element] + [fracinfo_i]
@@ -2251,7 +2249,7 @@ class Abundances:
                 
                 self.normalize_abundances()    
 
-        else:
+        else: #In this case, the user can provide one or more elements manually, the exclude_elements is not used. The profiles can be the same or different
             self.check_fracargs(elementinput=elements)
             
             if all(isinstance(l, list) for l in frac_intervals): 
@@ -2339,7 +2337,30 @@ class Abundances:
 
 
     def frac_powerlaw(self, element, rlower, rupper, powerlaw_index=None, finval=None, fraction=True):
+        """
+        Sets a power-law fractionation profile for a particular element in a given altitude range. 
+        Mathematical form: Abundance of an element at altitude r is x(r) = x(r0) (r/r0)^-p , where p is the power-law index and x(r0) is the mixing ratio at the base altitude r0.
 
+        Parameters
+        ----------
+        element : str
+            Element to be fractionated with the given power-law profile
+        rlower : numeric
+            Radii upto which the element is coupled with hydrogen, beyond which it is fractionated till rupper. 
+        rupper : numeric
+            Radii beyond which the element is coupled with hydrogen again.
+        powerlaw_index : numeric, optional
+            Index of the power-law profile (should be negative for fractionation). By default None, in which case it is calculated using finval, the value at rupper set by the user
+        finval : numeric, optional
+            Value of the element's abundance (relative to hydrogen) at rupper. By default None, in which case powerlaw_index has to be given (and finval is extracted and recorded in fractionation_info)
+        fraction : bool, optional
+            Used when finval is specified. If true, finval is used as a fraction, so the abundance at rupper is finval * abundance at rlower. If false, the absolute value of finval is used.
+        
+        Returns
+        -------
+        powerlaw_index: float
+            Returns the index of the power-law profile. Useful when only finval is specified, so it can be recorded in fractionation_info
+        """
         assert powerlaw_index is None or finval is None, "Please provide either the final mixing ratio or the power-law index, not both"
 
         base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1) #Get value right before the start of this fractionation
@@ -2347,7 +2368,7 @@ class Abundances:
         if finval is not None:
             if fraction is True:
                 finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
-            powerlaw_index = np.log10(finval / base_val[element].values[0]) / np.log10(fracrange[-1] / fracrange[0])
+            powerlaw_index = np.log10(finval / base_val[element].values[0]) / np.log10(fracrange[-1] / fracrange[0]) #Calculating power-law index using initial and final value if not given
 
         self.abundance_relH.loc[rlower:rupper, element] = base_val[element].values[0] * (fracrange / fracrange[0])**powerlaw_index
         if self.abundance_relH.loc[1:rupper, element].values[-1] > self.abundance_profiles.loc[self.fracrange[element][0], element]:
@@ -2355,8 +2376,31 @@ class Abundances:
             
         return powerlaw_index
 
-    def frac_expdecay(self, element, rlower, rupper, const=None, finval=None, fraction=True, return_const=False):
+    def frac_expdecay(self, element, rlower, rupper, const=None, finval=None, fraction=True):
+        """
+        Sets a exponential decay fractionation profile for a particular element in a given altitude range. 
+        Mathematical form: Abundance of an element at altitude r is x(r) = x(r0) e^(c(r-r0)) , where c is the decay constant and x(r0) is the abundance relative to hydrogen at the base altitude r0.
 
+        Parameters
+        ----------
+        element : str
+            Element to be fractionated with the given exponential decay profile.
+        rlower : numeric
+            Radii upto which the element is coupled with hydrogen, beyond which it is fractionated till rupper.
+        rupper : numeric
+            Radii beyond which the element is coupled with hydrogen again.
+        const : numeric, optional
+            Decay constant of the exponential decay profile (should be negative for fractionation). By default None, in which case it is calculated using finval, the value at rupper set by the user.
+        finval : numeric, optional
+            Value of the element's abundance (relative to hydrogen) at rupper. By default None, in which case const has to be given (and finval is extracted and recorded in fractionation_info).
+        fraction : bool, optional
+            Used when finval is specified. If true, finval is used as a fraction, so the abundance at rupper is finval * abundance at rlower. If false, the absolute value of finval is used.
+        
+        Returns
+        -------
+        const: float
+            Returns the decay constant of the profile. Useful when only finval is specified, so it can be recorded in fractionation_info
+        """
         assert const is None or finval is None, "Please provide either the final mixing ratio or the decay constant, not both"
 
         base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1) 
@@ -2364,7 +2408,7 @@ class Abundances:
         if finval is not None:
             if fraction is True:
                 finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element]
-            const = np.log(finval / base_val[element].values[0]) / (fracrange[-1] - fracrange[0])
+            const = np.log(finval / base_val[element].values[0]) / (fracrange[-1] - fracrange[0]) #Calculating decay constant using initial and final value if not given
     
         self.abundance_relH.loc[rlower:rupper, element] = base_val[element].values[0] * np.exp(const * (fracrange - fracrange[0]))
         if self.abundance_relH.loc[1:rupper, element].values[-1] > self.abundance_profiles.loc[self.fracrange[element][0], element]:
@@ -2373,7 +2417,30 @@ class Abundances:
         return const
 
     def frac_strline(self, element, rlower, rupper, finval=None, slope=None, fraction=True):
+        """
+        Sets a straight line fractionation profile for a particular element in a given altitude range. 
+        Mathematical form: Abundance of an element at altitude r is x(r) = x(r0) + m * (r - r0) , where m is the decay constant and x(r0) is the abundance relative to hydrogen at the base altitude r0.
 
+        Parameters
+        ----------
+        element : str
+            Element to be fractionated with the given straight line profile.
+        rlower : numeric
+            Radii upto which the element is coupled with hydrogen, beyond which it is fractionated till rupper.
+        rupper : numeric
+            Radii beyond which the element is coupled with hydrogen again.
+        slope : numeric, optional
+            Slope of the straight line (should be negative for fractionation). By default None, in which case it is calculated using finval, the value at rupper set by the user.
+        finval : numeric, optional
+            Value of the element's abundance (relative to hydrogen) at rupper. By default None, in which case slope has to be given (and finval is extracted and recorded in fractionation_info).
+        fraction : bool, optional
+            Used when finval is specified. If true, finval is used as a fraction, so the abundance at rupper is finval * abundance at rlower. If false, the absolute value of finval is used.
+        
+        Returns
+        -------
+        slope: float
+            Returns the slope of the straight line profile. Useful when only finval is specified, so it can be recorded in fractionation_info.
+        """
         assert finval is None or slope is None, "Please provide either the final mixing ratio or the slope of the line, not both"
 
         base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1)
@@ -2383,7 +2450,7 @@ class Abundances:
             if fraction is True:
                 finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
             
-            slope = (finval - base_val[element].values[0]) / (fracrange[-1] - fracrange[0])
+            slope = (finval - base_val[element].values[0]) / (fracrange[-1] - fracrange[0]) #Slope of the line is calculated from base and final value if not given
         
         self.abundance_relH.loc[rlower:rupper, element] = base_val[element].values[0] + slope * (fracrange - fracrange[0])
         if self.abundance_relH.loc[1:rupper, element].values[-1] > self.abundance_profiles.loc[self.fracrange[element][0], element]:
@@ -2394,20 +2461,43 @@ class Abundances:
         return slope
 
     def frac_ellipse(self, element, rlower, rupper, finval, fraction=True):
+        """
+        Sets a elliptical arc profile for a particular element in a given altitude range. 
+        Mathematical form: Abundance of an element at altitude r is x(r) = k + b * sqrt(1- (r-h)^2 / a^2), where (h,k) is the centre of the ellipse, a is the semi-major axis and b is the semi-minor axis.
+        Effectively, h is the radius where fractionation begins (rlower), k is the final value of abundance (relative to hydrogen), at the radius where the element is coupled with hydrogen again.
 
+        Parameters
+        ----------
+        element : str
+            Element to be fractionated with the given ellipse profile.
+        rlower : numeric
+            Radii upto which the element is coupled with hydrogen, beyond which it is fractionated till rupper.
+        rupper : numeric
+            Radii beyond which the element is coupled with hydrogen again.
+        finval : numeric, optional
+            Value of the element's abundance (relative to hydrogen) at rupper. 
+        fraction : bool, optional
+            Used when finval is specified. If true, finval is used as a fraction, so the abundance at rupper is finval * abundance at rlower. If false, the absolute value of finval is used.
+        """
         base_val = self.abundance_relH.loc[self.abundance_relH.index.values[0]:rlower].tail(1)
         fracrange = self.abundance_relH.loc[rlower:rupper, element].index.values
 
         if fraction is True:
             finval = finval * self.abundance_relH.loc[self.fracrange[element][0], element] 
+            print(finval)
         if finval > self.abundance_relH.loc[self.fracrange[element][0], element]:
                 warnings.warn(f"The abundance of {element} in the upper atmosphere is larger than the lower atmosphere, set fraction to False or pick a lower finval for a fractionated atmosphere")
 
-        __h = rlower #(h,k) is the centre of the ellipse
+        #__h = rlower #(h,k) is the centre of the ellipse
+        __h = fracrange[0]
         __k = finval
-        __a = rupper - rlower
+        __a = fracrange[-1] - fracrange[0]
         __b = base_val[element].values[0] - __k
-        self.abundance_relH.loc[rlower:rupper, element] = __k + __b * np.sqrt(1 - (fracrange - __h)**2 / __a**2)
+        print(__h, __k, __a, __b)
+        if __a > __b:
+            self.abundance_relH.loc[rlower:rupper, element] = __k + __b * np.sqrt(1 - (fracrange - __h)**2 / __a**2)
+        else:
+            self.abundance_relH.loc[rlower:rupper, element] = __k + __a * np.sqrt(1 - (fracrange - __h)**2 / __b**2)
 
         assert np.all(self.abundance_relH[element]>=0) , f"The abundance of {element} is negative at some points, please choose a different value for finval"
         
@@ -2432,15 +2522,14 @@ class Abundances:
         
     
     def check_fracargs(self, elementinput):
-
-        '''
+        """
         Used in set_fractionationprofile(). Checks that hydrogen is not present in the list of elements to be fractionated, and gives a warning if one or more elements in the list are already fractionated.
 
         Parameters
         ----------
         elementinput : list
             List of elements to be fractionated in set_fractionationprofile() 
-        '''
+        """
         for element in elementinput:
             assert element!='H', "You cannot fractionate hydrogen, fractionate other elements instead."
             if self.abundance_types[element] == "fractionated":
@@ -2451,8 +2540,14 @@ class Abundances:
 
 class Fractionation:
 
-    def __init__(self,simname):
+    '''
+    Class to assess the degree of fractionation and build profiles based on an initial sunbather simulation without fractionation.
+    '''
 
+    def __init__(self,simname):
+        '''
+        Creates 
+        '''
         self.elements = list(element_names.keys())
         self.sim = Sim(simname)
         self.planet = self.sim.p
